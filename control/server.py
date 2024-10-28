@@ -36,6 +36,12 @@ from .utils import GatewayUtils
 from .cephutils import CephUtils
 from .prometheus import start_exporter
 
+def sigterm_handler(signum, frame):
+    """Handle SIGTERM, runs when a gateway is terminated gracefully."""
+    logger = GatewayLogger().logger
+    logger.info(f"GatewayServer: SIGTERM received {signum=}")
+    raise SystemExit(0)
+
 def sigchld_handler(signum, frame):
     """Handle SIGCHLD, runs when a child process, like the spdk, terminates."""
     logger = GatewayLogger().logger
@@ -178,6 +184,9 @@ class GatewayServer:
 
         # install SIGCHLD handler
         signal.signal(signal.SIGCHLD, sigchld_handler)
+
+        # install SIGTERM handler
+        signal.signal(signal.SIGTERM, sigterm_handler)
 
         # Start monitor client
         self._start_monitor_client()
@@ -574,7 +583,9 @@ class GatewayServer:
                 consecutive_ping_failures += 1
                 if consecutive_ping_failures >= allowed_consecutive_spdk_ping_failures:
                     self.logger.critical(f"SPDK ping failed {consecutive_ping_failures} times, aborting")
-                    break
+                    raise SystemExit(f"SPDK ping failed, quitting gateway")
+                else:
+                    self.logger.warning(f"SPDK ping failed {consecutive_ping_failures} times, will keep trying")
             else:
                 consecutive_ping_failures = 0
 
