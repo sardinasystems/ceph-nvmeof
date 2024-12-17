@@ -12,7 +12,7 @@ from .server import GatewayServer
 from .config import GatewayConfig
 from .utils import GatewayLogger
 
-if __name__ == '__main__':
+def main(args=None):
     parser = argparse.ArgumentParser(prog="python3 -m control",
                                      description="Manage NVMe gateways",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -31,3 +31,6 @@ if __name__ == '__main__':
     with GatewayServer(config) as gateway:
         gateway.serve()
         gateway.keep_alive()
+
+if __name__ == '__main__':
+    main()
