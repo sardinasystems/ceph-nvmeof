@@ -1,0 +1,16 @@
+[Unit]
+Description=Ceph NVMe-oF HugeTLB Pages 2M Reservation
+DefaultDependencies=no
+Before=dev-hugepages.mount
+ConditionPathExists=/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+# ConditionPathExists=/sys/devices/system/node
+# ConditionKernelCommandLine=hugepagesz=1G
+
+[Service]
+Environment=NR_HUGEPAGES=
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'test -n "$NR_HUGEPAGES" && echo $NR_HUGEPAGES > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
+
+[Install]
+WantedBy=sysinit.target

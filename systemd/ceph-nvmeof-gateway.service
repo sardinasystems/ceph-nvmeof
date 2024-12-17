@@ -1,0 +1,46 @@
+[Unit]
+Description=Ceph NVMe-oF Gateway server
+PartOf=ceph-nvmeof.target
+After=network-online.target local-fs.target time-sync.target
+Before=remote-fs-pre.target ceph-nvmeof.target
+Wants=network-online.target local-fs.target time-sync.target remote-fs-pre.target ceph-nvmeof.target
+# optional unit to setup hugepages on boot up
+After=ceph-nvmeof-hugepages.service
+Wants=ceph-nvmeof-hugepages.service
+
+[Service]
+Environment=CLUSTER=ceph
+EnvironmentFile=-/etc/sysconfig/ceph
+
+ExecStart=/usr/sbin/ceph-nvmeof-gateway -c /etc/ceph/ceph-nvmeof.conf
+# ExecReload=/bin/kill -HUP $MAINPID
+
+# XXX TODO: taken from ceph-osd settings
+LimitNOFILE=1048576
+LimitNPROC=1048576
+
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# Need NewPrivileges via `sudo smartctl`
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+# flushing filestore requires access to /proc/sys/vm/drop_caches
+#ProtectKernelTunables=false
+ProtectSystem=full
+
+#Restart=on-failure
+Restart=always
+RestartSec=10
+
+#RestrictSUIDSGID=true
+#StartLimitBurst=3
+#StartLimitInterval=30min
+#TasksMax=infinity
+
+[Install]
+WantedBy=ceph-nvmeof.target
