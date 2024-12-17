@@ -232,7 +232,7 @@ class GatewayServer:
         self._start_spdk(omap_state)
 
         # Start discovery service
-        self._start_discovery_service()
+        # self._start_discovery_service()
 
         # Register service implementation with server
         gateway_state = GatewayStateHandler(self.config, local_state, omap_state, self.gateway_rpc_caller, f"gateway-{self.name}")
