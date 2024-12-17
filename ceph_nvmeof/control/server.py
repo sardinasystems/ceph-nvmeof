@@ -273,13 +273,18 @@ class GatewayServer:
 
     def _monitor_client_version(self) -> str:
         """Return monitor client version string."""
+        enable_monitor_client = self.config.getboolean_with_default("gateway", "enable_monitor_client", True)
+        cmd = self.monitor_client
+        if not enable_monitor_client:
+            cmd = '/usr/bin/ceph'
+
         # Get the current SIGCHLD handler
         original_sigchld_handler = signal.getsignal(signal.SIGCHLD)
 
         try:
             # Execute the command and capture its output
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
-            completed_process = subprocess.run([self.monitor_client, "--version"], capture_output=True, text=True)
+            completed_process = subprocess.run([cmd, "--version"], capture_output=True, text=True)
         finally:
             # Restore the original SIGCHLD handler
             signal.signal(signal.SIGCHLD, original_sigchld_handler)
