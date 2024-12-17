@@ -53,4 +53,6 @@ repository = "https://github.com/ceph/ceph-nvmeof.git"
 # changelog = ""
 
 [project.scripts]
-ceph-nvmeof = "control.cli:main"
+ceph-nvmeof = "ceph_nvmeof.control.cli:main"
+ceph-nvmeof-gateway = "ceph_nvmeof.control.__main__:main"
+ceph-nvmeof-discovery = "ceph_nvmeof.control.discovery:main"
