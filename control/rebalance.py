@@ -27,10 +27,11 @@ class Rebalance:
         self.ceph_utils = gateway_service.ceph_utils
         self.rebalance_period_sec              = gateway_service.config.getint_with_default("gateway",  "rebalance_period_sec", 7)
         self.rebalance_max_ns_to_change_lb_grp = gateway_service.config.getint_with_default("gateway", "max_ns_to_change_lb_grp", 8)
-        self.auto_rebalance = threading.Thread(target=self.auto_rebalance_task, daemon=True)
+        self.rebalance_event = threading.Event()
+        self.auto_rebalance = threading.Thread(target=self.auto_rebalance_task, daemon=True, args=(self.rebalance_event,))
         self.auto_rebalance.start() #start the thread
 
-    def auto_rebalance_task(self ):
+    def auto_rebalance_task(self, death_event):
         """Periodically calls for auto rebalance."""
         while (self.rebalance_period_sec > 0):
             for i in range(self.rebalance_max_ns_to_change_lb_grp):
@@ -41,6 +42,8 @@ class Rebalance:
                         break
                 except Exception:
                         self.logger.exception(f"Exception in auto rebalance")
+                        if death_event:
+                            death_event.set()
                         raise
                 time.sleep(0.01) #release lock for 10ms after rebalancing each 1 NS
             time.sleep(self.rebalance_period_sec)
