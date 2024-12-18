@@ -109,7 +109,7 @@ class GatewayServer:
         self.ceph_utils = None
         self.rpc_lock = threading.Lock()
         self.group_id = 0
-        self.monitor_client = '/usr/bin/ceph-nvmeof-monitor-client'
+        self.monitor_client = self.config.get_with_default("gateway", "monitor_client_path", "/usr/bin/ceph-nvmeof-monitor-client")
         self.monitor_client_log_file = None
         self.monitor_client_log_file_path = None
         self.omap_state = None
@@ -309,9 +309,9 @@ class GatewayServer:
                 "--gateway-pool", self.config.get("ceph", "pool"),
                 "--gateway-group", self.config.get_with_default("gateway", "group", ""),
                 "--monitor-group-address", self._monitor_address(),
-                '-c', '/etc/ceph/ceph.conf',
+                '-c', self.config.get_with_default("ceph", "config_file", "/etc/ceph/ceph.conf"),
                 '-n', rados_id,
-                '-k', '/etc/ceph/keyring']
+                '-k', self.config.get_with_default("ceph", "monitor_client_keyring", "/etc/ceph/keyring"), ]
         if self.config.getboolean("gateway", "enable_auth"):
             cmd += [
                 "--server-cert", self.config.get("mtls", "server_cert"),
