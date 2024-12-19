@@ -692,6 +692,10 @@ class GatewayServer:
             spdk_ping_interval_in_seconds = 0.0
 
         while True:
+            if self.gateway_rpc:
+                if self.gateway_rpc.rebalance.rebalance_event.is_set():
+                    self.logger.critical(f"Failure in rebalance, aborting")
+                    raise SystemExit(f"Failure in rebalance, quitting gateway")
             timedout = self.server.wait_for_termination(timeout=1)
             if not timedout:
                 break
