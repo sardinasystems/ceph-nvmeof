@@ -500,7 +500,7 @@ class TestCreate:
     def test_add_all_hosts_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "*"])
-        assert f"Failure adding host to namespace 8 on {subsystem}, host can't be \"*\"" in caplog.text
+        assert f"Failure adding host to namespace 8 on {subsystem}: Host NQN can't be \"*\"" in caplog.text
 
     def test_add_namespace_no_such_subsys(self, caplog, gateway):
         caplog.clear()
@@ -529,22 +529,22 @@ class TestCreate:
     def test_add_discovery_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", discovery_nqn])
-        assert f"Failure adding host to namespace 8 on {subsystem}, host NQN can't be a discovery NQN" in caplog.text
+        assert f"Failure adding host to namespace 8 on {subsystem}: Host NQN can't be a discovery NQN" in caplog.text
 
     def test_add_junk_host_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "junk"])
-        assert f"Failure adding host junk to namespace 8 on {subsystem}, invalid host NQN" in caplog.text
+        assert f"Failure adding host junk to namespace 8 on {subsystem}: Invalid host NQN" in caplog.text
 
     def test_add_host_to_namespace_junk_subsystem(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", "junk", "--nsid", "8", "--host-nqn", "nqn.2016-06.io.spdk:hostXX"])
-        assert f"Failure adding host nqn.2016-06.io.spdk:hostXX to namespace 8 on junk, invalid subsystem NQN" in caplog.text
+        assert f"Failure adding host nqn.2016-06.io.spdk:hostXX to namespace 8 on junk: Invalid subsystem NQN" in caplog.text
 
     def test_add_host_to_wrong_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "1", "--host-nqn", "nqn.2016-06.io.spdk:host10"])
-        assert f"Failure adding host nqn.2016-06.io.spdk:host10 to namespace 1 on {subsystem}, namespace is visible to all hosts" in caplog.text
+        assert f"Failure adding host nqn.2016-06.io.spdk:host10 to namespace 1 on {subsystem}: Namespace is visible to all hosts" in caplog.text
 
     def test_add_too_many_namespaces_with_hosts(self, caplog, gateway):
         caplog.clear()
