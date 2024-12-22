@@ -602,7 +602,7 @@ class OmapGatewayState(GatewayState):
         if omap_lock and omap_lock.omap_file_lock_duration > 0:
             try:
                 omap_lock.unlock_omap()
-            except Exceprion:
+            except Exception:
                 pass
         if self.ioctx:
             try:

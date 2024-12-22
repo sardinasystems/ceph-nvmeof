@@ -362,7 +362,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.host_name = socket.gethostname()
         self.verify_nqns = self.config.getboolean_with_default("gateway", "verify_nqns", True)
         self.gateway_group = self.config.get_with_default("gateway", "group", "")
-        self.max_hosts_per_namespace = self.config.getint_with_default("gateway", "max_hosts_per_namespace", 1)
+        self.max_hosts_per_namespace = self.config.getint_with_default("gateway", "max_hosts_per_namespace", 8)
         self.max_namespaces_with_netmask = self.config.getint_with_default("gateway", "max_namespaces_with_netmask", 1000)
         self.max_subsystems = self.config.getint_with_default("gateway", "max_subsystems", GatewayService.MAX_SUBSYSTEMS_DEFAULT)
         self.max_namespaces = self.config.getint_with_default("gateway", "max_namespaces", GatewayService.MAX_NAMESPACES_DEFAULT)
@@ -386,6 +386,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self._init_cluster_context()
         self.subsys_max_ns = {}
         self.host_info = SubsystemHostAuth()
+        self.up_and_running = True
         self.rebalance = Rebalance(self)
         
     def get_directories_for_key_file(self, key_type : str, subsysnqn : str, create_dir : bool = False) -> []:
@@ -668,6 +669,12 @@ class GatewayService(pb2_grpc.GatewayServicer):
            called might take OMAP lock internally, however does NOT ensure
            taking OMAP lock in any way.
         """
+
+        if not self.up_and_running:
+            errmsg = "Gateway is going down"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ESHUTDOWN, error_message=errmsg)
+
         return self.omap_lock.execute_omap_locking_function(self._grpc_function_with_lock, func, request, context)
 
     def create_bdev(self, anagrp: int, name, uuid, rbd_pool_name, rbd_image_name, block_size, create_image, rbd_image_size, context, peer_msg = ""):
@@ -988,7 +995,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 else:
                     subsys_using_serial = self.serial_number_already_used(context, request.serial_number)
                     if subsys_using_serial:
-                        errmsg = f"Serial number {request.serial_number} already used by subsystem {subsys_using_serial}"
+                        errmsg = f"Serial number {request.serial_number} is already used by subsystem {subsys_using_serial}"
                 if subsys_already_exists or subsys_using_serial:
                     errmsg = f"{create_subsystem_error_prefix}: {errmsg}"
                     self.logger.error(f"{errmsg}")
@@ -1527,7 +1534,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
         grps_list = []
         peer_msg = self.get_peer_message(context)
         change_lb_group_failure_prefix = f"Failure changing load balancing group for namespace with NSID {request.nsid} in {request.subsystem_nqn}"
-        self.logger.info(f"Received auto {request.auto_lb_logic} request to change load balancing group for namespace with NSID {request.nsid} in {request.subsystem_nqn} to {request.anagrpid}, context: {context}{peer_msg}")
+        auto_lb_msg = "auto" if request.auto_lb_logic else "manual"
+        self.logger.info(f"Received {auto_lb_msg} request to change load balancing group for namespace with NSID {request.nsid} in {request.subsystem_nqn} to {request.anagrpid}, context: {context}{peer_msg}")
 
         if not request.subsystem_nqn:
             errmsg = f"Failure changing load balancing group for namespace, missing subsystem NQN"

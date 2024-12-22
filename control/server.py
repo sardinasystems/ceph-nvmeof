@@ -125,6 +125,8 @@ class GatewayServer:
 
     def __exit__(self, exc_type, exc_value, traceback):
         """Cleans up SPDK and server instances."""
+        if self.gateway_rpc:
+            self.gateway_rpc.up_and_running = False
         if exc_type is not None:
             self.logger.exception("GatewayServer exception occurred:")
         else:
