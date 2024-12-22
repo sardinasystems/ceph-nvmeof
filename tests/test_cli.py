@@ -32,6 +32,7 @@ subsystem4 = "nqn.2016-06.io.spdk:cnode4"
 subsystem5 = "nqn.2016-06.io.spdk:cnode5"
 subsystem6 = "nqn.2016-06.io.spdk:cnode6"
 subsystem7 = "nqn.2016-06.io.spdk:cnode7"
+subsystem8 = "nqn.2016-06.io.spdk:cnode8"
 discovery_nqn = "nqn.2014-08.org.nvmexpress.discovery"
 serial = "Ceph00000000000001"
 uuid = "948878ee-c3b2-4d58-a29b-2cff713fc02d"
@@ -70,6 +71,7 @@ def gateway(config):
     port = config.getint("gateway", "port")
     config.config["gateway"]["group"] = group_name
     config.config["gateway"]["max_namespaces_with_netmask"] = "3"
+    config.config["gateway"]["max_hosts_per_namespace"] = "1"
     config.config["gateway"]["max_subsystems"] = "3"
     config.config["gateway"]["max_namespaces"] = "12"
     config.config["gateway"]["max_namespaces_per_subsystem"] = "11"
@@ -212,6 +214,9 @@ class TestCreate:
         assert f'"nqn": "{subsystem}"' in caplog.text
         assert f'"max_namespaces": 2049' in caplog.text
         caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem, "--max-namespaces", "2049", "--no-group-append"])
+        assert f"Failure creating subsystem {subsystem}: Subsystem already exists" in caplog.text
+        caplog.clear()
         cli(["subsystem", "add", "--subsystem", subsystem2, "--serial-number", serial, "--no-group-append"])
         assert f"Adding subsystem {subsystem2}: Successful" in caplog.text
         caplog.clear()
@@ -250,6 +255,9 @@ class TestCreate:
         assert subs_list.status == 0
         assert subs_list.subsystems[0].nqn == subsystem
         assert subs_list.subsystems[1].nqn == subsystem2
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem8, "--serial-number", serial, "--no-group-append"])
+        assert f"Failure creating subsystem {subsystem8}: Serial number {serial} is already used by subsystem {subsystem2}" in caplog.text
         caplog.clear()
         subs_list = cli_test(["subsystem", "list"])
         assert subs_list != None
