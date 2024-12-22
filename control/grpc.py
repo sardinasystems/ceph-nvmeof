@@ -2160,58 +2160,62 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.logger.info(f"Received request to add host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, context: {context}{peer_msg}")
 
         if not request.nsid:
-            errmsg = f"Failure adding host to namespace, missing NSID"
+            errmsg = f"Failure adding host to namespace: Missing NSID"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if not request.subsystem_nqn:
-            errmsg = f"Failure adding host to namespace {request.nsid}, missing subsystem NQN"
+            errmsg = f"Failure adding host to namespace {request.nsid}: Missing subsystem NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if not request.host_nqn:
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}, missing host NQN"
+            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Missing host NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if request.host_nqn == "*":
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}, host can't be \"*\""
+            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be \"*\""
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if self.verify_nqns:
             rc = GatewayUtils.is_valid_nqn(request.subsystem_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, invalid subsystem NQN: {rc[1]}"
+                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Invalid subsystem NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
             rc = GatewayUtils.is_valid_nqn(request.host_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, invalid host NQN: {rc[1]}"
+                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Invalid host NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.subsystem_nqn):
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}, subsystem NQN can't be a discovery NQN"
+            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Subsystem NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.host_nqn):
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}, host NQN can't be a discovery NQN"
+            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, request.nsid)
-        if not find_ret.empty():
-            if not find_ret.no_auto_visible:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, namespace is visible to all hosts"
-                self.logger.error(f"{errmsg}")
-                return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+        if find_ret.empty():
+            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Can't find namespace"
+            self.logger.error(errmsg)
+            return pb2.namespace_io_stats_info(status=errno.ENODEV, error_message=errmsg)
 
-            if find_ret.host_count() >= self.max_hosts_per_namespace:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, maximal host count for namespace ({self.max_hosts_per_namespace}) was already reached"
-                self.logger.error(f"{errmsg}")
-                return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
+        if not find_ret.no_auto_visible:
+            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Namespace is visible to all hosts"
+            self.logger.error(f"{errmsg}")
+            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+        if find_ret.host_count() >= self.max_hosts_per_namespace:
+            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, maximal host count for namespace ({self.max_hosts_per_namespace}) was already reached"
+            self.logger.error(f"{errmsg}")
+            return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
@@ -2262,45 +2266,50 @@ class GatewayService(pb2_grpc.GatewayServicer):
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if not request.subsystem_nqn:
-            errmsg = f"Failure deleting host from namespace {request.nsid}, missing subsystem NQN"
+            errmsg = f"Failure deleting host from namespace {request.nsid}: Missing subsystem NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if not request.host_nqn:
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}, missing host NQN"
+            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Missing host NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if request.host_nqn == "*":
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}, host can't be \"*\""
+            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be \"*\""
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if self.verify_nqns:
             rc = GatewayUtils.is_valid_nqn(request.subsystem_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}, invalid subsystem NQN: {rc[1]}"
+                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Invalid subsystem NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
             rc = GatewayUtils.is_valid_nqn(request.host_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}, invalid host NQN: {rc[1]}"
+                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Invalid host NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.subsystem_nqn):
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}, subsystem NQN can't be a discovery NQN"
+            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Subsystem NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.host_nqn):
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}, host NQN can't be a discovery NQN"
+            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, request.nsid)
+        if find_ret.empty():
+            errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Can't find namespace"
+            self.logger.error(errmsg)
+            return pb2.namespace_io_stats_info(status=errno.ENODEV, error_message=errmsg)
+
         if not find_ret.empty() and not find_ret.no_auto_visible:
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}, namespace is visible to all hosts"
+            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Namespace is visible to all hosts"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
@@ -2327,6 +2336,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 # Update gateway state
                 try:
                     self.gateway_state.remove_namespace_host(request.subsystem_nqn, request.nsid, request.host_nqn)
+                except KeyError:
+                    pass
                 except Exception as ex:
                     errmsg = f"Error persisting deletion of host {request.host_nqn} for namespace {request.nsid} on {request.subsystem_nqn}"
                     self.logger.exception(errmsg)
