@@ -190,6 +190,67 @@ function demo_bdevperf_unsecured()
     [[ `echo $conns | jq -r '.subsystem_nqn'` == "${NQN}" ]]
     [[ `echo $conns | jq -r '.connections[0]'` == "null" ]]
 
+    echo "ℹ️  bdevperf tcp connect ip: $NVMEOF_IP_ADDRESS port: $NVMEOF_IO_PORT nqn: $NQN, host not in namespace netmask"
+    devs=`make exec -s SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_attach_controller -b Nvme0 -t tcp -a $NVMEOF_IP_ADDRESS -s $NVMEOF_IO_PORT -f ipv4 -n $NQN -q ${NQN}host -l -1 -o 10"`
+    [[ "$devs" == "Nvme0n1" ]]
+
+    echo "ℹ️  verify connection list"
+    conns=$(cephnvmf_func --output stdio --format json connection list --subsystem $NQN)
+    [[ `echo $conns | jq -r '.status'` == "0" ]]
+    [[ `echo $conns | jq -r '.subsystem_nqn'` == "${NQN}" ]]
+    [[ `echo $conns | jq -r '.connections[0].nqn'` == "${NQN}host" ]]
+    [[ `echo $conns | jq -r '.connections[0].trsvcid'` == "${NVMEOF_IO_PORT}" ]]
+    [[ `echo $conns | jq -r '.connections[0].traddr'` == "${NVMEOF_IP_ADDRESS}" ]]
+    [[ `echo $conns | jq -r '.connections[0].adrfam'` == "ipv4" ]]
+    [[ `echo $conns | jq -r '.connections[0].trtype'` == "TCP" ]]
+    [[ `echo $conns | jq -r '.connections[0].connected'` == "true" ]]
+    [[ `echo $conns | jq -r '.connections[0].qpairs_count'` == "1" ]]
+    [[ `echo $conns | jq -r '.connections[0].secure'` == "false" ]]
+    [[ `echo $conns | jq -r '.connections[0].use_psk'` == "false" ]]
+    [[ `echo $conns | jq -r '.connections[0].use_dhchap'` == "false" ]]
+    [[ `echo $conns | jq -r '.connections[1]'` == "null" ]]
+
+    echo "ℹ️  change namespace visibility"
+    set +e
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible
+    if [[ $? -eq 0 ]]; then
+        echo "Changing namespace visibility with active connections should fail"
+        exit 1
+    fi
+    set -e
+
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible --force
+    make exec SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_detach_controller Nvme0"
+    set +e
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 5 --no-auto-visible
+    if [[ $? -eq 0 ]]; then
+        echo "Changing visibility of a non-existing namespace should fail"
+        exit 1
+    fi
+    set -e
+
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --no-auto-visible
+
+    echo "ℹ️  bdevperf tcp connect ip: $NVMEOF_IP_ADDRESS port: $NVMEOF_IO_PORT nqn: $NQN, after changing visibility"
+    devs=`make exec -s SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_attach_controller -b Nvme0 -t tcp -a $NVMEOF_IP_ADDRESS -s $NVMEOF_IO_PORT -f ipv4 -n $NQN -q ${NQN}host -l -1 -o 10"`
+    [[ "$devs" == "Nvme0n1" ]]
+    make exec SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_detach_controller Nvme0"
+
+    echo "ℹ️  add host to namespace again, wrong NSID"
+    set +e
+    cephnvmf_func namespace add_host --subsystem $NQN --nsid 5 --host-nqn ${NQN}host
+    if [[ $? -eq 0 ]]; then
+        echo "Adding host to a non-existing namespace should fail"
+        exit 1
+    fi
+    set -e
+
+    echo "ℹ️  add host to namespace again"
+    cephnvmf_func namespace add_host --subsystem $NQN --nsid 2 --host-nqn ${NQN}host
+    devs=`make exec -s SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_attach_controller -b Nvme0 -t tcp -a $NVMEOF_IP_ADDRESS -s $NVMEOF_IO_PORT -f ipv4 -n $NQN -q ${NQN}host -l -1 -o 10"`
+    [[ "$devs" == "Nvme0n1 Nvme0n2" ]]
+    make exec SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_detach_controller Nvme0"
+
     return $?
 }
 

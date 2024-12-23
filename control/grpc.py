@@ -14,9 +14,7 @@ import uuid
 import random
 import os
 import errno
-import contextlib
 import threading
-import time
 import hashlib
 import tempfile
 from pathlib import Path
@@ -129,12 +127,12 @@ class SubsystemHostAuth:
         self.host_nqn[subsys].add(hostnqn)
 
     def remove_host_nqn(self, subsys, hostnqn):
-        if not subsys in self.host_nqn:
+        if subsys not in self.host_nqn:
             return
         self.host_nqn[subsys].discard(hostnqn)
 
     def get_host_count(self, subsys):
-        if not subsys in self.host_nqn:
+        if subsys not in self.host_nqn:
             return 0
         return len(self.host_nqn[subsys])
 
@@ -165,16 +163,16 @@ class SubsystemHostAuth:
         return key
 
 class NamespaceInfo:
-    def __init__(self, nsid, bdev, uuid, anagrpid, no_auto_visible):
+    def __init__(self, nsid, bdev, uuid, anagrpid, auto_visible):
         self.nsid = nsid
         self.bdev = bdev
         self.uuid = uuid
-        self.no_auto_visible = no_auto_visible
+        self.auto_visible = auto_visible
         self.anagrpid = anagrpid
         self.host_list = []
 
     def __str__(self):
-        return f"nsid: {self.nsid}, bdev: {self.bdev}, uuid: {self.uuid}, no_auto_visible: {self.no_auto_visible}, anagrpid: {self.anagrpid}, hosts: {self.host_list}"
+        return f"nsid: {self.nsid}, bdev: {self.bdev}, uuid: {self.uuid}, auto_visible: {self.auto_visible}, anagrpid: {self.anagrpid}, hosts: {self.host_list}"
 
     def empty(self) -> bool:
         if self.bdev or self.uuid:
@@ -190,6 +188,12 @@ class NamespaceInfo:
             self.host_list.remove(host_nqn)
         except ValueError:
             pass
+
+    def remove_all_hosts(self):
+        self.host_list = []
+
+    def set_visibility(self, auto_visible: bool):
+        self.auto_visible = auto_visible
 
     def is_host_in_namespace(self, host_nqn):
         return host_nqn in self.host_list
@@ -216,10 +220,10 @@ class NamespacesLocalList:
             else:
                 self.namespace_list.pop(nqn, None)
 
-    def add_namespace(self, nqn, nsid, bdev, uuid, anagrpid, no_auto_visible):
+    def add_namespace(self, nqn, nsid, bdev, uuid, anagrpid, auto_visible):
         if not bdev:
             bdev = GatewayService.find_unique_bdev_name(uuid)
-        self.namespace_list[nqn][nsid] = NamespaceInfo(nsid, bdev, uuid, anagrpid, no_auto_visible)
+        self.namespace_list[nqn][nsid] = NamespaceInfo(nsid, bdev, uuid, anagrpid, auto_visible)
 
     def find_namespace(self, nqn, nsid, uuid = None) -> NamespaceInfo:
         if nqn not in self.namespace_list:
@@ -238,7 +242,7 @@ class NamespacesLocalList:
 
         return NamespacesLocalList.EMPTY_NAMESPACE
 
-    def get_namespace_count(self, nqn, no_auto_visible = None, min_hosts = 0) -> int:
+    def get_namespace_count(self, nqn, auto_visible = None, min_hosts = 0) -> int:
         if nqn and nqn not in self.namespace_list:
             return 0
 
@@ -246,15 +250,15 @@ class NamespacesLocalList:
             subsystems = [nqn]
         else:
             subsystems = self.namespace_list.keys()
-        
+
         ns_count = 0
         for one_subsys in subsystems:
             for nsid in self.namespace_list[one_subsys]:
                 ns = self.namespace_list[one_subsys][nsid]
                 if ns.empty():
                     continue
-                if no_auto_visible is not None:
-                    if ns.no_auto_visible == no_auto_visible and ns.host_count() >= min_hosts:
+                if auto_visible is not None:
+                    if ns.auto_visible == auto_visible and ns.host_count() >= min_hosts:
                         ns_count += 1
                 else:
                     if ns.host_count() >= min_hosts:
@@ -388,7 +392,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.host_info = SubsystemHostAuth()
         self.up_and_running = True
         self.rebalance = Rebalance(self)
-        
+
     def get_directories_for_key_file(self, key_type : str, subsysnqn : str, create_dir : bool = False) -> []:
         tmp_dirs = []
         dir_prefix = f"{key_type}_{subsysnqn}_"
@@ -425,7 +429,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
         if not tmp_dir_names:
             return None
 
-        file = None
         filepath = None
         keyfile_prefix = f"{hostnqn}_"
         try:
@@ -556,7 +559,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         return pb2.req_status(status=rc[0], error_message=rc[1])
 
     def parse_json_exeption(self, ex):
-        if type(ex) != JSONRPCException:
+        if not isinstance(ex, JSONRPCException):
             return None
 
         json_error_text = "Got JSON-RPC error response"
@@ -1201,9 +1204,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 continue
         return errmsg, nqn
 
-    def create_namespace(self, subsystem_nqn, bdev_name, nsid, anagrpid, uuid, no_auto_visible, context):
+    def create_namespace(self, subsystem_nqn, bdev_name, nsid, anagrpid, uuid, auto_visible, context):
         """Adds a namespace to a subsystem."""
- 
+
         if context:
             assert self.omap_lock.locked(), "OMAP is unlocked when calling create_namespace()"
 
@@ -1219,7 +1222,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         add_namespace_error_prefix = f"Failure adding namespace{nsid_msg} to {subsystem_nqn}"
 
         peer_msg = self.get_peer_message(context)
-        self.logger.info(f"Received request to add {bdev_name} to {subsystem_nqn} with ANA group id {anagrpid}{nsid_msg}, no_auto_visible: {no_auto_visible}, context: {context}{peer_msg}")
+        self.logger.info(f"Received request to add {bdev_name} to {subsystem_nqn} with ANA group id {anagrpid}{nsid_msg}, auto_visible: {auto_visible}, context: {context}{peer_msg}")
 
         if subsystem_nqn not in self.subsys_max_ns:
             errmsg = f"{add_namespace_error_prefix}: No such subsystem"
@@ -1236,9 +1239,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(errmsg)
             return pb2.nsid_status(status=errno.EINVAL, error_message=errmsg)
 
-        if no_auto_visible and self.subsystem_nsid_bdev_and_uuid.get_namespace_count(subsystem_nqn,
-                                                                               True, 0) >= self.max_namespaces_with_netmask:
-            errmsg = f"{add_namespace_error_prefix}: Maximal number of namespaces which are not auto visible ({self.max_namespaces_with_netmask}) has already been reached"
+        if not auto_visible and self.subsystem_nsid_bdev_and_uuid.get_namespace_count(subsystem_nqn,
+                                                                               False, 0) >= self.max_namespaces_with_netmask:
+            errmsg = f"{add_namespace_error_prefix}: Maximal number of namespaces which are only visible to selected hosts ({self.max_namespaces_with_netmask}) has already been reached"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
@@ -1271,13 +1274,15 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 nsid=nsid,
                 anagrpid=anagrpid,
                 uuid=uuid,
-                no_auto_visible=no_auto_visible,
+                no_auto_visible=not auto_visible,
             )
-            self.subsystem_nsid_bdev_and_uuid.add_namespace(subsystem_nqn, nsid, bdev_name, uuid, anagrpid, no_auto_visible)
+            self.subsystem_nsid_bdev_and_uuid.add_namespace(subsystem_nqn, nsid, bdev_name, uuid, anagrpid, auto_visible)
             self.logger.debug(f"subsystem_add_ns: {nsid}")
             self.ana_grp_ns_load[anagrpid] += 1
-            if anagrpid in self.ana_grp_subs_load and subsystem_nqn in self.ana_grp_subs_load[anagrpid]: self.ana_grp_subs_load[anagrpid][subsystem_nqn] += 1
-            else : self.ana_grp_subs_load[anagrpid][subsystem_nqn] = 1
+            if anagrpid in self.ana_grp_subs_load and subsystem_nqn in self.ana_grp_subs_load[anagrpid]:
+                self.ana_grp_subs_load[anagrpid][subsystem_nqn] += 1
+            else:
+                self.ana_grp_subs_load[anagrpid][subsystem_nqn] = 1
         except Exception as ex:
             self.logger.exception(add_namespace_error_prefix)
             errmsg = f"{add_namespace_error_prefix}:\n{ex}"
@@ -1308,7 +1313,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """Sets ana state for this gateway."""
         self.logger.info(f"Received request to set ana states {ana_info.states}, {peer_msg}")
 
-        state = self.gateway_state.local.get_state()
         inaccessible_ana_groups = {}
         awaited_cluster_contexts = set()
         # Iterate over nqn_ana_states in ana_info
@@ -1321,7 +1325,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 self.ana_grp_state[gs.grp_id]  = gs.state
 
             # If this is not set the subsystem was not created yet
-            if not nqn in self.subsys_max_ns:
+            if nqn not in self.subsys_max_ns:
                 continue
 
             self.logger.debug(f"Iterate over {nqn=} {self.subsystem_listeners[nqn]=}")
@@ -1398,7 +1402,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.logger.info(f"Found min loaded cluster: chosen ana group {chosen_ana_group} for ns {nsid} ")
         return chosen_ana_group
 
- 
     def namespace_add_safe(self, request, context):
         """Adds a namespace to a subsystem."""
 
@@ -1434,9 +1437,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
             ns = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, None, request.uuid)
             if not ns.empty():
-                 errmsg = f"Failure adding namespace, UUID {request.uuid} is already in use"
-                 self.logger.error(f"{errmsg}")
-                 return pb2.nsid_status(status=errno.EEXIST, error_message = errmsg)
+                errmsg = f"Failure adding namespace, UUID {request.uuid} is already in use"
+                self.logger.error(f"{errmsg}")
+                return pb2.nsid_status(status=errno.EEXIST, error_message = errmsg)
 
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
@@ -1488,7 +1491,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
             # If we got here we asserted that ret_bdev.bdev_name == bdev_name
 
-            ret_ns = self.create_namespace(request.subsystem_nqn, bdev_name, request.nsid, anagrp, request.uuid, request.no_auto_visible, context)
+            ret_ns = self.create_namespace(request.subsystem_nqn, bdev_name, request.nsid, anagrp, request.uuid, not request.no_auto_visible, context)
             if ret_ns.status == 0 and request.nsid and ret_ns.nsid != request.nsid:
                 errmsg = f"Returned NSID {ret_ns.nsid} differs from requested one {request.nsid}"
                 self.logger.error(errmsg)
@@ -1547,7 +1550,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
 
-        if context: #below checks are legal only if command is initiated by local cli or is sent from the local rebalance logic.
+        #below checks are legal only if command is initiated by local cli or is sent from the local rebalance logic.
+        if context:
             grps_list = self.ceph_utils.get_number_created_gateways(self.gateway_pool, self.gateway_group)
             if request.anagrpid not in grps_list:
                 self.logger.debug(f"ANA groups: {grps_list}")
@@ -1568,7 +1572,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 try:
                     state_ns = state[ns_key]
                     ns_entry = json.loads(state_ns)
-                except Exception as ex:
+                except Exception:
                     errmsg = f"{change_lb_group_failure_prefix}: Can't find entry for namespace {request.nsid} in {request.subsystem_nqn}"
                     self.logger.error(errmsg)
                     return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
@@ -1605,17 +1609,18 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 self.logger.error(change_lb_group_failure_prefix)
                 return pb2.req_status(status=errno.EINVAL, error_message=change_lb_group_failure_prefix)
             # change LB success - need to update the data structures
-            self.ana_grp_ns_load[anagrpid] -= 1   #decrease loading of previous "old" ana group
+            self.ana_grp_ns_load[anagrpid] -= 1   # decrease loading of previous "old" ana group
             self.ana_grp_subs_load[anagrpid][request.subsystem_nqn] -= 1
             self.logger.debug(f"updated load in grp {anagrpid} = {self.ana_grp_ns_load[anagrpid]} ")
             self.ana_grp_ns_load[request.anagrpid] += 1
             if request.anagrpid in self.ana_grp_subs_load and request.subsystem_nqn in self.ana_grp_subs_load[request.anagrpid]:
                 self.ana_grp_subs_load[request.anagrpid][request.subsystem_nqn] += 1
-            else : self.ana_grp_subs_load[request.anagrpid][request.subsystem_nqn] = 1
+            else:
+                self.ana_grp_subs_load[request.anagrpid][request.subsystem_nqn] = 1
             self.logger.debug(f"updated load in grp {request.anagrpid} = {self.ana_grp_ns_load[request.anagrpid]} ")
             #here update  find_ret.set_ana_group_id(request.anagrpid)
             if not find_ret.empty():
-               find_ret.set_ana_group_id(request.anagrpid)
+                find_ret.set_ana_group_id(request.anagrpid)
 
             if context:
                 assert ns_entry, "Namespace entry is None for non-update call"
@@ -1647,6 +1652,136 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """Changes a namespace load balancing group."""
         return self.execute_grpc_function(self.namespace_change_load_balancing_group_safe, request, context)
 
+    def subsystem_has_connections(self, subsys: str) -> bool:
+        assert subsys, "Subsystem NQN is empty"
+        try:
+            ctrl_ret = rpc_nvmf.nvmf_subsystem_get_controllers(self.spdk_rpc_client, nqn=subsys)
+        except Exception:
+            return False
+        if not ctrl_ret:
+            return False
+        return True
+
+    def namespace_change_visibility_safe(self, request, context):
+        """Changes a namespace visibility."""
+
+        peer_msg = self.get_peer_message(context)
+        failure_prefix = f"Failure changing visibility for namespace {request.nsid} in {request.subsystem_nqn}"
+        vis_txt = "\"visible to all hosts\"" if request.auto_visible else "\"visible to selected hosts\""
+        self.logger.info(f"Received request to change the visibility of namespace {request.nsid} in {request.subsystem_nqn} to {vis_txt}, force: {request.force}, context: {context}{peer_msg}")
+
+        if not request.subsystem_nqn:
+            errmsg = f"Failure changing visibility for namespace, missing subsystem NQN"
+            self.logger.error(f"{errmsg}")
+            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+        if not request.nsid:
+            errmsg = f"Failure changing visibility for namespace in {request.subsystem_nqn}: No NSID was given"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        # If this is not set the subsystem was not created yet
+        if request.subsystem_nqn not in self.subsys_max_ns:
+            errmsg = f"{failure_prefix}: Can't find subsystem"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, request.nsid)
+        if find_ret.empty():
+            errmsg = f"{failure_prefix}: Can't find namespace"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        if find_ret.host_count() > 0 and request.auto_visible:
+            if request.force:
+                self.logger.warning(f"Asking to change visibility of namespace {request.nsid} in {request.subsystem_nqn} to be visible to all hosts while there are already hosts added to it. Will continue as the \"--force\" parameter was used but these hosts will be removed from the namespace.")
+            else:
+                errmsg = f"{failure_prefix}: Asking to change visibility of namespace to be visible to all hosts while there are already hosts added to it. Either remove these hosts or use the \"--force\" parameter"
+                self.logger.error(errmsg)
+                return pb2.req_status(status=errno.EBUSY, error_message=errmsg)
+
+        if self.subsystem_has_connections(request.subsystem_nqn):
+            if request.force:
+                self.logger.warning(f"Asking to change visibility of namespace {request.nsid} in {request.subsystem_nqn} while there are active connections on the subsystem, will continue as the \"--force\" parameter was used.")
+            else:
+                errmsg = f"{failure_prefix}: Asking to change visibility of namespace while there are active connections on the subsystem, please disconnect them or use the \"--force\" parameter."
+                self.logger.error(errmsg)
+                return pb2.req_status(status=errno.EBUSY, error_message=errmsg)
+
+        omap_lock = self.omap_lock.get_omap_lock_to_use(context)
+        with omap_lock:
+            ns_entry = None
+            if context:
+                # notice that the local state might not be up to date in case we're in the middle of update() but as the
+                # context is not None, we are not in an update(), the omap lock made sure that we got here with an updated local state
+                state = self.gateway_state.local.get_state()
+                ns_key = GatewayState.build_namespace_key(request.subsystem_nqn, request.nsid)
+                try:
+                    state_ns = state[ns_key]
+                    ns_entry = json.loads(state_ns)
+                    if ns_entry["no_auto_visible"] == (not request.auto_visible):
+                        self.logger.warning(f"No change to namespace {request.nsid} in {request.subsystem_nqn} visibility, nothing to do")
+                        return pb2.req_status(status=0, error_message=os.strerror(0))
+                except Exception:
+                    errmsg = f"{failure_prefix}: Can't find entry for namespace {request.nsid} in {request.subsystem_nqn}"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
+            try:
+                ret = rpc_nvmf.nvmf_subsystem_set_ns_visibility(
+                    self.spdk_rpc_client,
+                    nqn=request.subsystem_nqn,
+                    nsid=request.nsid,
+                    auto_visible=request.auto_visible,
+                )
+                self.logger.debug(f"nvmf_subsystem_set_ns_visible: {ret}")
+                if request.force and find_ret.host_count() > 0 and request.auto_visible:
+                    self.logger.warning(f"Removing all hosts added to namespace {request.nsid} in {request.subsystem_nqn} as it was set to be visible to all hosts")
+                    find_ret.remove_all_hosts()
+                find_ret.set_visibility(request.auto_visible)
+            except Exception as ex:
+                errmsg = f"{failure_prefix}:\n{ex}"
+                resp = self.parse_json_exeption(ex)
+                status = errno.EINVAL
+                if resp:
+                    status = resp["code"]
+                    errmsg = f"{failure_prefix}: {resp['message']}"
+                return pb2.req_status(status=status, error_message=errmsg)
+
+            # Just in case SPDK failed with no exception
+            if not ret:
+                self.logger.error(failure_prefix)
+                return pb2.req_status(status=errno.EINVAL, error_message=failure_prefix)
+
+            if context:
+                assert ns_entry, "Namespace entry is None for non-update call"
+                # Update gateway state
+                try:
+                    add_req = pb2.namespace_add_req(rbd_pool_name=ns_entry["rbd_pool_name"],
+                                                    rbd_image_name=ns_entry["rbd_image_name"],
+                                                    subsystem_nqn=ns_entry["subsystem_nqn"],
+                                                    nsid=ns_entry["nsid"],
+                                                    block_size=ns_entry["block_size"],
+                                                    uuid=ns_entry["uuid"],
+                                                    anagrpid=ns_entry["anagrpid"],
+                                                    create_image=ns_entry["create_image"],
+                                                    size=int(ns_entry["size"]),
+                                                    force=ns_entry["force"],
+                                                    no_auto_visible=not request.auto_visible)
+                    json_req = json_format.MessageToJson(
+                        add_req, preserving_proto_field_name=True, including_default_value_fields=True)
+                    self.gateway_state.add_namespace(request.subsystem_nqn, request.nsid, json_req)
+                except Exception as ex:
+                    errmsg = f"Error persisting visibility change for namespace {request.nsid} in {request.subsystem_nqn}"
+                    self.logger.exception(errmsg)
+                    errmsg = f"{errmsg}:\n{ex}"
+                    return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+        return pb2.req_status(status=0, error_message=os.strerror(0))
+
+    def namespace_change_visibility(self, request, context=None):
+        """Changes a namespace visibility."""
+        return self.execute_grpc_function(self.namespace_change_visibility_safe, request, context)
+
     def remove_namespace_from_state(self, nqn, nsid, context):
         if not context:
             return pb2.req_status(status=0, error_message=os.strerror(0))
@@ -1657,17 +1792,17 @@ class GatewayService(pb2_grpc.GatewayServicer):
         # Update gateway state
         try:
             self.gateway_state.remove_namespace_qos(nqn, str(nsid))
-        except Exception as ex:
+        except Exception:
             pass
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(nqn, nsid)
         for hst in find_ret.host_list:
             try:
                 self.gateway_state.remove_namespace_host(nqn, str(nsid), hst)
-            except Exception as ex:
+            except Exception:
                 pass
         try:
             self.gateway_state.remove_namespace_lb_group(nqn, str(nsid))
-        except Exception as ex:
+        except Exception:
             pass
         try:
             self.gateway_state.remove_namespace(nqn, str(nsid))
@@ -1801,12 +1936,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem, nsid)
                     if find_ret.empty():
                         self.logger.warning(f"Can't find info of namesapce {nsid} in {request.subsystem}. Visibility status will be inaccurate")
-                    no_auto_visible = find_ret.no_auto_visible
                     one_ns = pb2.namespace_cli(nsid = nsid,
                                            bdev_name = bdev_name,
                                            uuid = n["uuid"],
                                            load_balancing_group = lb_group,
-                                           no_auto_visible = no_auto_visible,
+                                           auto_visible = find_ret.auto_visible,
                                            hosts = find_ret.host_list)
                     with self.rpc_lock:
                         ns_bdev = self.get_bdev_info(bdev_name)
@@ -1941,7 +2075,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             pass
 
         return pb2.namespace_io_stats_info(status=errno.EINVAL,
-                               error_message=f"Failure getting IO stats for namespace {nsid_msg}on {request.subsystem_nqn}: Error parsing returned stats:\n{exmsg}") 
+                               error_message=f"Failure getting IO stats for namespace {request.nsid} on {request.subsystem_nqn}: Error parsing returned stats:\n{exmsg}") 
 
     def get_qos_limits_string(self, request):
         limits_to_set = ""
@@ -2002,7 +2136,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             try:
                 state_ns_qos = state[ns_qos_key]
                 ns_qos_entry = json.loads(state_ns_qos)
-            except Exception as ex:
+            except Exception:
                 self.logger.info(f"No previous QOS limits found, this is the first time the limits are set for namespace {request.nsid} on {request.subsystem_nqn}")
 
         # Merge current limits with previous ones, if exist
@@ -2157,10 +2291,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """Add a host to a namespace."""
 
         peer_msg = self.get_peer_message(context)
+        failure_prefix = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}"
         self.logger.info(f"Received request to add host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, context: {context}{peer_msg}")
 
         if not request.nsid:
-            errmsg = f"Failure adding host to namespace: Missing NSID"
+            errmsg = f"Failure adding host {request.host_nqn} to namespace on {request.subsystem_nqn}: Missing NSID"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
@@ -2174,46 +2309,52 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
+        # If this is not set the subsystem was not created yet
+        if request.subsystem_nqn not in self.subsys_max_ns:
+            errmsg = f"{failure_prefix}: Can't find subsystem"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
         if request.host_nqn == "*":
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be \"*\""
+            errmsg = f"{failure_prefix}: Host NQN can't be \"*\""
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if self.verify_nqns:
             rc = GatewayUtils.is_valid_nqn(request.subsystem_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Invalid subsystem NQN: {rc[1]}"
+                errmsg = f"{failure_prefix}: Invalid subsystem NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
             rc = GatewayUtils.is_valid_nqn(request.host_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Invalid host NQN: {rc[1]}"
+                errmsg = f"{failure_prefix}: Invalid host NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.subsystem_nqn):
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Subsystem NQN can't be a discovery NQN"
+            errmsg = f"{failure_prefix}: Subsystem NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.host_nqn):
-            errmsg = f"Failure adding host to namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be a discovery NQN"
+            errmsg = f"{failure_prefix}: Host NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, request.nsid)
         if find_ret.empty():
-            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Can't find namespace"
+            errmsg = f"{failure_prefix}: Can't find namespace"
             self.logger.error(errmsg)
             return pb2.namespace_io_stats_info(status=errno.ENODEV, error_message=errmsg)
 
-        if not find_ret.no_auto_visible:
-            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}: Namespace is visible to all hosts"
+        if find_ret.auto_visible:
+            errmsg = f"{failure_prefix}: Namespace is visible to all hosts"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if find_ret.host_count() >= self.max_hosts_per_namespace:
-            errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}, maximal host count for namespace ({self.max_hosts_per_namespace}) was already reached"
+            errmsg = f"{failure_prefix}: Maximal host count for namespace ({self.max_hosts_per_namespace}) was already reached"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
@@ -2227,12 +2368,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 host=request.host_nqn
             )
             self.logger.debug(f"ns_visible {request.host_nqn}: {ret}")
-            if not find_ret.empty():
-                find_ret.add_host(request.host_nqn)
+            find_ret.add_host(request.host_nqn)
 
             # Just in case SPDK failed with no exception
             if not ret:
-                errmsg = f"Failure adding host {request.host_nqn} to namespace {request.nsid} on {request.subsystem_nqn}"
+                errmsg = failure_prefix
                 self.logger.error(errmsg)
                 return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
@@ -2258,15 +2398,16 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """Delete a host from a namespace."""
 
         peer_msg = self.get_peer_message(context)
+        failure_prefix = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}"
         self.logger.info(f"Received request to delete host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}, context: {context}{peer_msg}")
 
         if not request.nsid:
-            errmsg = f"Failure deleting host from namespace, missing NSID"
+            errmsg = f"Failure deleting host {request.host_nqn} from namespace: Missing NSID"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
         if not request.subsystem_nqn:
-            errmsg = f"Failure deleting host from namespace {request.nsid}: Missing subsystem NQN"
+            errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid}: Missing subsystem NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
@@ -2275,43 +2416,54 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
 
+        # If this is not set the subsystem was not created yet
+        if request.subsystem_nqn not in self.subsys_max_ns:
+            errmsg = f"{failure_prefix}: Can't find subsystem"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
         if request.host_nqn == "*":
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be \"*\""
+            errmsg = f"{failure_prefix}: Host NQN can't be \"*\""
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if self.verify_nqns:
             rc = GatewayUtils.is_valid_nqn(request.subsystem_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Invalid subsystem NQN: {rc[1]}"
+                errmsg = f"{failure_prefix}: Invalid subsystem NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
             rc = GatewayUtils.is_valid_nqn(request.host_nqn)
             if rc[0] != 0:
-                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Invalid host NQN: {rc[1]}"
+                errmsg = f"{failure_prefix}: Invalid host NQN: {rc[1]}"
                 self.logger.error(f"{errmsg}")
                 return pb2.req_status(status = rc[0], error_message = errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.subsystem_nqn):
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Subsystem NQN can't be a discovery NQN"
+            errmsg = f"{failure_prefix}: Subsystem NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.host_nqn):
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Host NQN can't be a discovery NQN"
+            errmsg = f"{failure_prefix}: Host NQN can't be a discovery NQN"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn, request.nsid)
         if find_ret.empty():
-            errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}: Can't find namespace"
+            errmsg = f"{failure_prefix}: Can't find namespace"
             self.logger.error(errmsg)
             return pb2.namespace_io_stats_info(status=errno.ENODEV, error_message=errmsg)
 
-        if not find_ret.empty() and not find_ret.no_auto_visible:
-            errmsg = f"Failure deleting host from namespace {request.nsid} on {request.subsystem_nqn}: Namespace is visible to all hosts"
+        if find_ret.auto_visible:
+            errmsg = f"{failure_prefix}: Namespace is visible to all hosts"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+        if not find_ret.is_host_in_namespace(request.host_nqn):
+            errmsg = f"{failure_prefix}: Host is not found in namespace's host list"
+            self.logger.error(f"{errmsg}")
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
 
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
@@ -2328,7 +2480,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
             # Just in case SPDK failed with no exception
             if not ret:
-                errmsg = f"Failure deleting host {request.host_nqn} from namespace {request.nsid} on {request.subsystem_nqn}"
+                errmsg = failure_prefix
                 self.logger.error(errmsg)
                 return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
@@ -2459,6 +2611,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
             errmsg=f"{all_host_failure_prefix}: Can't allow any host access on a subsystem having a DH-HMAC-CHAP key"
             self.logger.error(f"{errmsg}")
             return pb2.req_status(status = errno.EINVAL, error_message = errmsg)
+
+        if request.host_nqn != "*" and self.host_info.is_any_host_allowed(request.subsystem_nqn):
+            self.logger.warning(f"A specific host {request.host_nqn} was added to subsystem {request.subsystem_nqn} in which all hosts are allowed")
 
         if self.verify_nqns:
             rc = GatewayService.is_valid_host_nqn(request.host_nqn)
@@ -3027,7 +3182,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 adrfam = ""
                 trtype = "TCP"
                 hostnqn = conn["hostnqn"]
-                connected = False
                 found = False
                 secure = False
                 psk = False
@@ -3513,7 +3667,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                             nonce = self.cluster_nonce[self.bdev_cluster[bdev]]
                         n["nonce"] = nonce
                         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(s["nqn"], n["nsid"])
-                        n["no_auto_visible"] = find_ret.no_auto_visible
+                        n["auto_visible"] = find_ret.auto_visible
                         n["hosts"] = find_ret.host_list
                 # Parse the JSON dictionary into the protobuf message
                 subsystem = pb2.subsystem()
@@ -3577,7 +3731,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 try:
                     state_subsys = state[subsys_key]
                     subsys_entry = json.loads(state_subsys)
-                except Exception as ex:
+                except Exception:
                     errmsg = f"{failure_prefix}: Can't find entry for subsystem {request.subsystem_nqn}"
                     self.logger.error(errmsg)
                     return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
@@ -3612,7 +3766,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                                  dhchap_key=hosts[hnqn])
             try:
                 self.change_host_key_safe(change_req, context)
-            except Excpetion:
+            except Exception:
                 pass
 
 

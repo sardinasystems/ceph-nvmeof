@@ -37,9 +37,10 @@ class GatewayState(ABC):
     NAMESPACE_QOS_PREFIX = "qos" + OMAP_KEY_DELIMITER
     NAMESPACE_LB_GROUP_PREFIX = "lbgroup" + OMAP_KEY_DELIMITER
     NAMESPACE_HOST_PREFIX = "ns-host" + OMAP_KEY_DELIMITER
+    NAMESPACE_VISIBILITY_PREFIX = "ns-visibility" + OMAP_KEY_DELIMITER
 
     def is_key_element_valid(s: str) -> bool:
-        if type(s) != str:
+        if not isinstance(s, str):
             return False
         if GatewayState.OMAP_KEY_DELIMITER in s:
             return False
@@ -53,6 +54,12 @@ class GatewayState(ABC):
 
     def build_namespace_lbgroup_key(subsystem_nqn: str, nsid) -> str:
         key = GatewayState.NAMESPACE_LB_GROUP_PREFIX + subsystem_nqn
+        if nsid is not None:
+            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+        return key
+
+    def build_namespace_visibility_key(subsystem_nqn: str, nsid) -> str:
+        key = GatewayState.NAMESPACE_VISIBILITY_PREFIX + subsystem_nqn
         if nsid is not None:
             key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
         return key
@@ -339,11 +346,11 @@ class OmapLock:
                 if i > 0:
                     self.logger.info(f"Succeeded to lock OMAP file after {i} retries")
                 break
-            except rados.ObjectExists as ex:
+            except rados.ObjectExists:
                 self.logger.info(f"We already locked the OMAP file")
                 got_lock = True
                 break
-            except rados.ObjectBusy as ex:
+            except rados.ObjectBusy:
                 self.logger.warning(
                        f"The OMAP file is locked, will try again in {self.omap_file_lock_retry_sleep_interval} seconds")
                 with ReleasedLock(self.rpc_lock):
@@ -378,7 +385,7 @@ class OmapLock:
 
         try:
             self.omap_state.ioctx.unlock(self.omap_state.omap_name, self.OMAP_FILE_LOCK_NAME, self.OMAP_FILE_LOCK_COOKIE)
-        except rados.ObjectNotFound as ex:
+        except rados.ObjectNotFound:
             if self.is_locked:
                 self.logger.warning(f"No such lock, the lock duration might have passed")
         except Exception:
@@ -526,7 +533,7 @@ class OmapGatewayState(GatewayState):
         # Notify other gateways within the group of change
         try:
             self.ioctx.notify(self.omap_name, timeout_ms = self.notify_timeout)
-        except Exception as ex:
+        except Exception:
             self.logger.warning(f"Failed to notify.")
 
     def _remove_key(self, key: str):
@@ -553,7 +560,7 @@ class OmapGatewayState(GatewayState):
         # Notify other gateways within the group of change
         try:
             self.ioctx.notify(self.omap_name, timeout_ms = self.notify_timeout)
-        except Exception as ex:
+        except Exception:
             self.logger.warning(f"Failed to notify.")
 
     def delete_state(self):
@@ -762,6 +769,30 @@ class GatewayStateHandler:
             return (False, None)
         return (True, new_req.anagrpid)
 
+    def namespace_only_visibility_changed(self, old_val, new_val):
+        # If only the visibility field has changed we can use change_visibility request instead of re-adding the namespace
+        old_req = None
+        new_req = None
+        try:
+            old_req = json_format.Parse(old_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+        except json_format.ParseError:
+            self.logger.exception(f"Got exception parsing {old_val}")
+            return (False, None)
+        try:
+            new_req = json_format.Parse(new_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+        except json_format.ParseError:
+            self.logger.exeption(f"Got exception parsing {new_val}")
+            return (False, None)
+        if not old_req or not new_req:
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, new: {new_val} -> {new_req}")
+            return (False, None)
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical old and new values ({old_req})"
+        old_req.no_auto_visible = new_req.no_auto_visible
+        if old_req != new_req:
+            # Something besides the group id is different
+            return (False, None)
+        return (True, not new_req.no_auto_visible)
+
     def host_only_key_changed(self, old_val, new_val):
         # If only the dhchap key has changed we can use change_key request instead of re-adding the host
         old_req = None
@@ -877,7 +908,7 @@ class GatewayStateHandler:
         return subsys_nqn
 
     def get_str_from_bytes(val):
-        val_str = val.decode() if type(val) == type(b'') else val
+        val_str = val.decode() if isinstance(val, bytes) else val
         return val_str
 
     def compare_state_values(val1, val2) -> bool:
@@ -933,6 +964,7 @@ class GatewayStateHandler:
 
                 # Handle namespace changes in which only the load balancing group id was changed
                 only_lb_group_changed = []
+                only_visibility_changed = []
                 only_host_key_changed = []
                 only_subsystem_key_changed = []
                 ns_prefix = GatewayState.build_namespace_key("nqn", None)
@@ -940,35 +972,32 @@ class GatewayStateHandler:
                 subsystem_prefix = GatewayState.build_subsystem_key("nqn")
                 for key in changed.keys():
                     if key.startswith(ns_prefix):
-                        try:
-                            (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(local_state_dict[key],
-                                                                                                      omap_state_dict[key])
-                            if should_process:
-                                assert new_lb_grp_id, "Shouldn't get here with an empty lb group id"
-                                self.logger.debug(f"Found {key} where only the load balancing group id has changed. The new group id is {new_lb_grp_id}")
-                                only_lb_group_changed.append((key, new_lb_grp_id))
-                        except Exception as ex:
-                            self.logger.warning("Got exception checking namespace for load balancing group id change")
+                        (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(local_state_dict[key],
+                                                                                                  omap_state_dict[key])
+                        if should_process:
+                            assert new_lb_grp_id, "Shouldn't get here with an empty lb group id"
+                            self.logger.debug(f"Found {key} where only the load balancing group id has changed. The new group id is {new_lb_grp_id}")
+                            only_lb_group_changed.append((key, new_lb_grp_id))
+
+                        (should_process,
+                         new_visibility) = self.namespace_only_visibility_changed(local_state_dict[key], omap_state_dict[key])
+                        if should_process:
+                            self.logger.debug(f"Found {key} where only the visibility has changed. The new visibility is {new_visibility}")
+                            only_visibility_changed.append((key, new_visibility))
                     elif key.startswith(host_prefix):
-                        try:
-                            (should_process,
-                             new_dhchap_key) = self.host_only_key_changed(local_state_dict[key], omap_state_dict[key])
-                            if should_process:
-                                assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
-                                self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
-                                only_host_key_changed.append((key, new_dhchap_key))
-                        except Exception as ex:
-                            self.logger.warning("Got exception checking host for key change")
+                        (should_process,
+                         new_dhchap_key) = self.host_only_key_changed(local_state_dict[key], omap_state_dict[key])
+                        if should_process:
+                            assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
+                            self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
+                            only_host_key_changed.append((key, new_dhchap_key))
                     elif key.startswith(subsystem_prefix):
-                        try:
-                            (should_process,
-                             new_dhchap_key) = self.subsystem_only_key_changed(local_state_dict[key], omap_state_dict[key])
-                            if should_process:
-                                assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
-                                self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
-                                only_subsystem_key_changed.append((key, new_dhchap_key))
-                        except Exception as ex:
-                            self.logger.warning("Got exception checking subsystem for key change")
+                        (should_process,
+                         new_dhchap_key) = self.subsystem_only_key_changed(local_state_dict[key], omap_state_dict[key])
+                        if should_process:
+                            assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
+                            self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
+                            only_subsystem_key_changed.append((key, new_dhchap_key))
 
                 for ns_key, new_lb_grp in only_lb_group_changed:
                     ns_nqn = None
@@ -976,8 +1005,8 @@ class GatewayStateHandler:
                     try:
                         changed.pop(ns_key)
                         (ns_nqn, ns_nsid) = self.break_namespace_key(ns_key)
-                    except Exception as ex:
-                        self.logger.error(f"Exception removing {ns_key} from {changed}:\n{ex}")
+                    except Exception:
+                        self.logger.exception(f"Exception removing {ns_key} from {changed}")
                     if ns_nqn and ns_nsid:
                         try:
                             lbgroup_key = GatewayState.build_namespace_lbgroup_key(ns_nqn, ns_nsid)
@@ -986,8 +1015,27 @@ class GatewayStateHandler:
                             json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
                                                                  including_default_value_fields=True)
                             added[lbgroup_key] = json_req
-                        except Exception as ex:
-                            self.logger.error(f"Exception formatting change namespace load balancing group request:\n{ex}")
+                        except Exception:
+                            self.logger.exception(f"Exception formatting change namespace load balancing group request")
+
+                for ns_key, new_visibility in only_visibility_changed:
+                    ns_nqn = None
+                    ns_nsid = None
+                    try:
+                        changed.pop(ns_key)
+                        (ns_nqn, ns_nsid) = self.break_namespace_key(ns_key)
+                    except Exception:
+                        self.logger.exception(f"Exception removing {ns_key} from {changed}")
+                    if ns_nqn and ns_nsid:
+                        try:
+                            visibility_key = GatewayState.build_namespace_visibility_key(ns_nqn, ns_nsid)
+                            req = pb2.namespace_change_visibility_req(subsystem_nqn=ns_nqn, nsid=ns_nsid,
+                                                                      auto_visible=new_visibility, force=True)
+                            json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
+                                                                 including_default_value_fields=True)
+                            added[visibility_key] = json_req
+                        except Exception:
+                            self.logger.exception(f"Exception formatting change namespace visibility request")
 
                 for host_key, new_dhchap_key in only_host_key_changed:
                     subsys_nqn = None
@@ -995,8 +1043,8 @@ class GatewayStateHandler:
                     try:
                         changed.pop(host_key)
                         (subsys_nqn, host_nqn) = self.break_host_key(host_key)
-                    except Exception as ex:
-                        self.logger.error(f"Exception removing {host_key} from {changed}:\n{ex}")
+                    except Exception:
+                        self.logger.exception(f"Exception removing {host_key} from {changed}")
                     if host_nqn == "*":
                         self.logger.warning(f"Something went wrong, host \"*\" can't have DH-HMAC-CHAP keys, ignore")
                         continue
@@ -1016,8 +1064,8 @@ class GatewayStateHandler:
                     try:
                         changed.pop(subsys_key)
                         subsys_nqn = self.break_subsystem_key(subsys_key)
-                    except Exception as ex:
-                        self.logger.error(f"Exception removing {subsys_key} from {changed}:\n{ex}")
+                    except Exception:
+                        self.logger.exception(f"Exception removing {subsys_key} from {changed}")
                     if subsys_nqn:
                         try:
                             subsys_key_key = GatewayState.build_subsystem_key_key(subsys_nqn)
@@ -1028,12 +1076,14 @@ class GatewayStateHandler:
                         except Exception as ex:
                             self.logger.error(f"Exception formatting change subsystem key request:\n{ex}")
 
-                if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or len(only_subsystem_key_changed) > 0:
+                if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0:
                     grouped_changed = self._group_by_prefix(changed, prefix_list)
                     if len(only_subsystem_key_changed) > 0:
                         prefix_list += [GatewayState.SUBSYSTEM_KEY_PREFIX]
                     if len(only_lb_group_changed) > 0:
                         prefix_list += [GatewayState.NAMESPACE_LB_GROUP_PREFIX]
+                    if len(only_visibility_changed) > 0:
+                        prefix_list += [GatewayState.NAMESPACE_VISIBILITY_PREFIX]
                     if len(only_host_key_changed) > 0:
                         prefix_list += [GatewayState.HOST_KEY_PREFIX]
                     grouped_added = self._group_by_prefix(added, prefix_list)
