@@ -595,7 +595,7 @@ class OmapGatewayState(GatewayState):
                                     (str(version_update),))
                 self.ioctx.operate_write_op(write_op, self.omap_name)
             self.version = version_update
-            self.logger.debug(f"omap_key generated: {key}")
+            self.logger.info(f"omap_key generated: {key}, OMAP version: {version_update}")
         except Exception:
             self.logger.exception("Unable to add key to OMAP, exiting!")
             raise
@@ -1047,9 +1047,11 @@ class GatewayStateHandler:
             omap_version = int(omap_state_dict[self.omap.OMAP_VERSION_KEY])
             local_version = self.omap.get_local_version()
 
+            self.logger.info(f"Check local version {local_version} against OMAP version "
+                             f"{omap_version}")
             if local_version < omap_version:
-                self.logger.debug(f"Start update from {local_version} to "
-                                  f"{omap_version} ({self.id_text}).")
+                self.logger.info(f"Start update from {local_version} to {omap_version} "
+                                 f"({self.id_text}).")
                 local_state_dict = self.local.get_state()
                 local_state_keys = local_state_dict.keys()
                 omap_state_keys = omap_state_dict.keys()
@@ -1242,9 +1244,8 @@ class GatewayStateHandler:
                 # Update local state and version
                 self.local.reset(omap_state_dict)
                 self.omap.set_local_version(omap_version)
-                self.logger.debug(f"Update complete ({local_version} -> "
-                                  f"{omap_version}) ({self.id_text}).")
-
+                self.logger.info(f"Update complete ({local_version} -> {omap_version}) "
+                                 f"({self.id_text}).")
         return True
 
     def _group_by_prefix(self, state_update, prefix_list):
