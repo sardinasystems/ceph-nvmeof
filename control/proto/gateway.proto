@@ -60,6 +60,9 @@ service Gateway {
 	// Changes namespace's load balancing group
 	rpc namespace_change_load_balancing_group(namespace_change_load_balancing_group_req) returns (req_status) {}
 
+	// Changes namespace's visibility
+	rpc namespace_change_visibility(namespace_change_visibility_req) returns (req_status) {}
+
 	// Deletes a namespace
 	rpc namespace_delete(namespace_delete_req) returns (req_status) {}
 
@@ -166,6 +169,13 @@ message namespace_change_load_balancing_group_req {
 	optional string OBSOLETE_uuid = 3;
 	int32 anagrpid = 4;
         optional bool auto_lb_logic = 5;
+}
+
+message namespace_change_visibility_req {
+	string subsystem_nqn = 1;
+	uint32 nsid = 2;
+	bool auto_visible = 3;
+	optional bool force = 4;
 }
 
 message namespace_delete_req {
@@ -375,7 +385,7 @@ message namespace {
     optional string uuid = 5;
     optional uint32 anagrpid = 6;
     optional string nonce = 7;
-    optional bool no_auto_visible = 8;
+    optional bool auto_visible = 8;
     repeated string hosts = 9;
 }
 
@@ -493,7 +503,7 @@ message namespace_cli {
 	uint64 rw_mbytes_per_second = 10;
 	uint64 r_mbytes_per_second = 11;
 	uint64 w_mbytes_per_second = 12;
-	bool no_auto_visible = 13;
+	bool auto_visible = 13;
 	repeated string hosts = 14;
 }
 

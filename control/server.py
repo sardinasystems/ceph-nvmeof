@@ -15,7 +15,6 @@ import subprocess
 import grpc
 import json
 import threading
-import contextlib
 import time
 from concurrent import futures
 from google.protobuf import json_format
@@ -144,7 +143,7 @@ class GatewayServer:
 
         if self.spdk_log_file:
             try:
-                close(self.spdk_log_file)
+                self.spdk_log_file.close()
             except Exception:
                 pass
             self.spdk_log_file = None
@@ -155,7 +154,7 @@ class GatewayServer:
 
         if self.monitor_client_log_file:
             try:
-                close(self.monitor_client_log_file)
+                self.monitor_client_log_file.close()
             except Exception:
                 pass
             self.monitor_client_log_file = None
@@ -250,13 +249,12 @@ class GatewayServer:
         self.server.start()
 
         # Set SPDK log level
-        log_level_args = {}
         log_level = self.config.get_with_default("spdk", "log_level", None)
         if log_level and log_level.strip():
             log_level = log_level.strip().upper()
             log_req = pb2.set_spdk_nvmf_logs_req(log_level=log_level, print_level=log_level)
             self.gateway_rpc.set_spdk_nvmf_logs(log_req)
-        
+
         self._register_service_map()
 
         # This should be at the end of the function, after the server is up
@@ -472,7 +470,7 @@ class GatewayServer:
         sockname = self.config.get_with_default("spdk", "rpc_socket_name", "spdk.sock")
         if sockname.find("/") >= 0:
             self.logger.error(f"Invalid SPDK socket name \"{sockname}\". Name should not contain a \"/\".")
-            raise(f"Invalid SPDK socket name.")
+            raise RuntimeError(f"Invalid SPDK socket name.")
         self.spdk_rpc_socket_path = sockdir + sockname
         self.logger.info(f"SPDK Socket: {self.spdk_rpc_socket_path}")
         spdk_tgt_cmd_extra_args = self.config.get_with_default(
@@ -609,7 +607,7 @@ class GatewayServer:
         self.monitor_client_process = None
         if self.monitor_client_log_file:
             try:
-                close(self.monitor_client_log_file)
+                self.monitor_client_log_file.close()
             except Exception:
                 pass
             self.monitor_client_log_file = None
@@ -625,7 +623,7 @@ class GatewayServer:
         self.spdk_process = None
         if self.spdk_log_file:
             try:
-                close(self.spdk_log_file)
+                self.spdk_log_file.close()
             except Exception:
                 pass
             self.spdk_log_file = None
@@ -671,8 +669,7 @@ class GatewayServer:
                 raise
 
         try:
-            status = rpc_nvmf.nvmf_create_transport(
-                self.spdk_rpc_client, **args)
+            rpc_nvmf.nvmf_create_transport( self.spdk_rpc_client, **args)
         except Exception:
             self.logger.exception(f"Create Transport {trtype} returned with error")
             raise
@@ -717,7 +714,7 @@ class GatewayServer:
     def _ping(self):
         """Confirms communication with SPDK process."""
         try:
-            ret = spdk.rpc.spdk_get_version(self.spdk_rpc_ping_client)
+            spdk.rpc.spdk_get_version(self.spdk_rpc_ping_client)
             return True
         except Exception:
             self.logger.exception(f"spdk_get_version failed")
@@ -759,7 +756,7 @@ class GatewayServer:
                         self.logger.warning(f"The actual huge page count {hugepages_val} is smaller than the requested value of {requested_hugepages_val}")
                 else:
                     self.logger.warning(f"Can't read actual huge pages count value from {hugepages_file}")
-            except Exception as ex:
+            except Exception:
                 self.logger.exception(f"Can't read actual huge pages count value from {hugepages_file}")
         else:
             self.logger.warning(f"Can't find huge pages file {hugepages_file}")
@@ -810,6 +807,10 @@ class GatewayServer:
                 if is_add_req:
                     req = json_format.Parse(val, pb2.namespace_change_load_balancing_group_req(), ignore_unknown_fields=True)
                     self.gateway_rpc.namespace_change_load_balancing_group(req)
+            elif key.startswith(GatewayState.NAMESPACE_VISIBILITY_PREFIX):
+                if is_add_req:
+                    req = json_format.Parse(val, pb2.namespace_change_visibility_req(), ignore_unknown_fields=True)
+                    self.gateway_rpc.namespace_change_visibility(req)
             elif key.startswith(GatewayState.NAMESPACE_HOST_PREFIX):
                 if is_add_req:
                     req = json_format.Parse(val, pb2.namespace_add_host_req(), ignore_unknown_fields=True)
