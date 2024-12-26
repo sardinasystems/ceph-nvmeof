@@ -1853,7 +1853,7 @@ class GatewayClient:
 
     def get_qos_limit_str_value(self, qos_limit):
         if qos_limit == 0:
-            return "unlimited"
+            return "unset"
         else:
             return str(qos_limit)
 
