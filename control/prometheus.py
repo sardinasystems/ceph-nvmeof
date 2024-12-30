@@ -109,7 +109,7 @@ class NVMeOFCollector:
         self.gw_config = config
         _bdev_pools = config.get_with_default('gateway', 'prometheus_bdev_pools', '')
         self.bdev_pools = _bdev_pools.split(',') if _bdev_pools else []
-        self.interval = config.getint_with_default('gateway', 'prometheus_stats_inteval', 10)
+        self.interval = config.getint_with_default('gateway', 'prometheus_stats_interval', 10)
         self.lock = threading.Lock()
         self.hostname = os.getenv('NODE_NAME') or os.getenv('HOSTNAME')
 

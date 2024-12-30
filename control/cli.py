@@ -506,6 +506,7 @@ class GatewayClient:
     gw_actions.append({"name" : "get_log_level", "args" : [], "help" : "Get gateway's log level"})
     gw_actions.append({"name" : "set_log_level", "args" : gw_set_log_level_args, "help" : "Set gateway's log level"})
     gw_choices = get_actions(gw_actions)
+
     @cli.cmd(gw_actions)
     def gw(self, args):
         """Gateway commands"""
@@ -596,8 +597,6 @@ class GatewayClient:
 
     def spdk_log_level_set(self, args):
         """Set SPDK log levels and nvmf log flags"""
-        rc = 0
-        errmsg = ""
 
         out_func, err_func = self.get_output_functions(args)
         log_level = None
@@ -655,6 +654,7 @@ class GatewayClient:
     spdk_log_actions.append({"name" : "set", "args" : spdk_log_set_args, "help" : "Set SPDK log levels and nvmf log flags"})
     spdk_log_actions.append({"name" : "disable", "args" : spdk_log_disable_args, "help" : "Disable SPDK nvmf log flags"})
     spdk_log_choices = get_actions(spdk_log_actions)
+
     @cli.cmd(spdk_log_actions)
     def spdk_log_level(self, args):
         """SPDK nvmf log level commands"""
@@ -691,7 +691,7 @@ class GatewayClient:
         new_nqn = ""
         try:
             new_nqn = ret.nqn
-        except Exception as ex:  # In case of an old gateway the returned value wouldn't have the nqn field
+        except Exception:  # In case of an old gateway the returned value wouldn't have the nqn field
            pass
         if not new_nqn:
             new_nqn = args.subsystem
@@ -826,7 +826,6 @@ class GatewayClient:
     def subsystem_change_key(self, args):
         """Change subsystem's inband authentication key."""
 
-        rc = 0
         out_func, err_func = self.get_output_functions(args)
 
         req = pb2.change_subsystem_key_req(subsystem_nqn=args.subsystem, dhchap_key=args.dhchap_key)
@@ -884,6 +883,7 @@ class GatewayClient:
     subsystem_actions.append({"name" : "list", "args" : subsys_list_args, "help" : "List subsystems"})
     subsystem_actions.append({"name" : "change_key", "args" : subsys_change_key_args, "help" : "Change subsystem key"})
     subsystem_choices = get_actions(subsystem_actions)
+
     @cli.cmd(subsystem_actions)
     def subsystem(self, args):
         """Subsystem commands"""
@@ -1026,11 +1026,11 @@ class GatewayClient:
         if args.format == "text" or args.format == "plain":
             if listeners_info.status == 0:
                 listeners_list = []
-                for l in listeners_info.listeners:
-                    adrfam = GatewayEnumUtils.get_key_from_value(pb2.AddressFamily, l.adrfam)
+                for lstnr in listeners_info.listeners:
+                    adrfam = GatewayEnumUtils.get_key_from_value(pb2.AddressFamily, lstnr.adrfam)
                     adrfam = self.format_adrfam(adrfam)
-                    secure = "Yes" if l.secure else "No"
-                    listeners_list.append([l.host_name, l.trtype, adrfam, f"{l.traddr}:{l.trsvcid}", secure])
+                    secure = "Yes" if lstnr.secure else "No"
+                    listeners_list.append([lstnr.host_name, lstnr.trtype, adrfam, f"{lstnr.traddr}:{lstnr.trsvcid}", secure])
                 if len(listeners_list) > 0:
                     if args.format == "text":
                         table_format = "fancy_grid"
@@ -1086,6 +1086,7 @@ class GatewayClient:
     listener_actions.append({"name" : "del", "args" : listener_del_args, "help" : "Delete a listener"})
     listener_actions.append({"name" : "list", "args" : listener_list_args, "help" : "List listeners"})
     listener_choices = get_actions(listener_actions)
+
     @cli.cmd(listener_actions)
     def listener(self, args):
         """Listener commands"""
@@ -1216,7 +1217,6 @@ class GatewayClient:
     def host_change_key(self, args):
         """Change host's inband authentication keys."""
 
-        rc = 0
         out_func, err_func = self.get_output_functions(args)
 
         if args.host_nqn == "*":
@@ -1327,6 +1327,7 @@ class GatewayClient:
     host_actions.append({"name" : "list", "args" : host_list_args, "help" : "List subsystem's host access"})
     host_actions.append({"name" : "change_key", "args" : host_change_key_args, "help" : "Change host's inband authentication keys"})
     host_choices = get_actions(host_actions)
+
     @cli.cmd(host_actions)
     def host(self, args):
         """Host commands"""
@@ -1406,6 +1407,7 @@ class GatewayClient:
     connection_actions = []
     connection_actions.append({"name" : "list", "args" : connection_list_args, "help" : "List active connections"})
     connection_choices = get_actions(connection_actions)
+
     @cli.cmd(connection_actions)
     def connection(self, args):
         """Connection commands"""
@@ -1601,7 +1603,7 @@ class GatewayClient:
         try:
             sz = sz.strip()
             int_size = int(sz)
-        except:
+        except Exception:
             self.cli.parser.error(f"Size {sz} must be numeric")
 
         int_size *= multiply
@@ -1638,14 +1640,15 @@ class GatewayClient:
                         lb_group = "<n/a>"
                     else:
                         lb_group = str(ns.load_balancing_group)
-                    if ns.no_auto_visible:
-                        if len(ns.hosts) > 0:
-                            for hst in ns.hosts:
-                                visibility = break_string(hst, ":", 2) + "\n"
-                        else:
-                            visibility = "Selective"
-                    else:
+                    if ns.auto_visible:
                         visibility = "All Hosts"
+                    else:
+                        if len(ns.hosts) > 0:
+                            visibility = ""
+                            for hst in ns.hosts:
+                                visibility += "· " + break_string(hst, ":", 2) + "\n"
+                        else:
+                            visibility = "Restrictive"
 
                     namespaces_list.append([ns.nsid,
                                             break_string(ns.bdev_name, "-", 2),
@@ -1850,7 +1853,7 @@ class GatewayClient:
 
     def get_qos_limit_str_value(self, qos_limit):
         if qos_limit == 0:
-            return "unlimited"
+            return "unset"
         else:
             return str(qos_limit)
 
@@ -1977,7 +1980,7 @@ class GatewayClient:
 
             if args.format == "text" or args.format == "plain":
                 if ret.status == 0:
-                    out_func(f"Deleting host {args.host_nqn} from namespace {args.nsid} on {args.subsystem}: Successful")
+                    out_func(f"Deleting host {one_host_nqn} from namespace {args.nsid} on {args.subsystem}: Successful")
                 else:
                     err_func(f"{ret.error_message}")
             elif args.format == "json" or args.format == "yaml":
@@ -2000,6 +2003,61 @@ class GatewayClient:
             return ret_list
 
         return rc
+
+    def ns_change_visibility(self, args):
+        """Change namespace visibility."""
+
+        out_func, err_func = self.get_output_functions(args)
+        if args.nsid <= 0:
+            self.cli.parser.error("nsid value must be positive")
+
+        if not args.auto_visible and not args.no_auto_visible:
+            self.cli.parser.error("Either --auto-visible or --no-auto-visible should be specified")
+
+        if args.auto_visible and args.no_auto_visible:
+            self.cli.parser.error("--auto-visible and --no-auto-visible are mutually exclusive")
+
+        if args.auto_visible:
+            auto_visible = True
+        elif args.no_auto_visible:
+            auto_visible = False
+        else:
+            assert False
+
+        try:
+            change_visibility_req = pb2.namespace_change_visibility_req(subsystem_nqn=args.subsystem,
+                                                                                nsid=args.nsid, auto_visible=auto_visible,
+                                                                                force=args.force)
+            ret = self.stub.namespace_change_visibility(change_visibility_req)
+        except Exception as ex:
+            ret = pb2.req_status(status = errno.EINVAL, error_message = f"Failure changing namespace visibility:\n{ex}")
+
+        if auto_visible:
+            vis_text = "\"visible to all hosts\""
+        else:
+            vis_text = "\"visible to selected hosts\""
+        if args.format == "text" or args.format == "plain":
+            if ret.status == 0:
+                out_func(f"Changing visibility of namespace {args.nsid} in {args.subsystem} to {vis_text}: Successful")
+            else:
+                err_func(f"{ret.error_message}")
+        elif args.format == "json" or args.format == "yaml":
+            ret_str = json_format.MessageToJson(
+                        ret,
+                        indent=4,
+                        including_default_value_fields=True,
+                        preserving_proto_field_name=True)
+            if args.format == "json":
+                out_func(f"{ret_str}")
+            elif args.format == "yaml":
+                obj = json.loads(ret_str)
+                out_func(yaml.dump(obj))
+        elif args.format == "python":
+            return ret
+        else:
+            assert False
+
+        return ret.status
 
     ns_common_args = [
         argument("--subsystem", "-n", help="Subsystem NQN", required=True),
@@ -2034,6 +2092,12 @@ class GatewayClient:
         argument("--nsid", help="Namespace ID", type=int, required=True),
         argument("--load-balancing-group", "-l", help="Load balancing group", type=int, required=True),
     ]
+    ns_change_visibility_args_list = ns_common_args + [
+        argument("--nsid", help="Namespace ID", type=int, required=True),
+        argument("--auto-visible", help="Visible to all hosts", action='store_true', required=False),
+        argument("--no-auto-visible", help="Visible to selected hosts only", action='store_true', required=False),
+        argument("--force", help="Change visibility of namespace even if there hosts added to it or active connections on the subsystem", action='store_true', required=False),
+    ]
     ns_set_qos_args_list = ns_common_args + [
         argument("--nsid", help="Namespace ID", type=int, required=True),
         argument("--rw-ios-per-second", help="R/W IOs per second limit, 0 means unlimited", type=int),
@@ -2059,7 +2123,9 @@ class GatewayClient:
     ns_actions.append({"name" : "set_qos", "args" : ns_set_qos_args_list, "help" : "Set QOS limits for a namespace"})
     ns_actions.append({"name" : "add_host", "args" : ns_add_host_args_list, "help" : "Add a host to a namespace"})
     ns_actions.append({"name" : "del_host", "args" : ns_del_host_args_list, "help" : "Delete a host from a namespace"})
+    ns_actions.append({"name" : "change_visibility", "args" : ns_change_visibility_args_list, "help" : "Change visibility for a namespace"})
     ns_choices = get_actions(ns_actions)
+
     @cli.cmd(ns_actions, ["ns"])
     def namespace(self, args):
         """Namespace commands"""
@@ -2081,6 +2147,8 @@ class GatewayClient:
             return self.ns_add_host(args)
         elif args.action == "del_host":
             return self.ns_del_host(args)
+        elif args.action == "change_visibility":
+            return self.ns_change_visibility(args)
         if not args.action:
             self.cli.parser.error(f"missing action for namespace command (choose from {GatewayClient.ns_choices})")
 
@@ -2134,6 +2202,7 @@ def main(args=None) -> int:
         return -1
 
     return main_common(client, parsed_args)
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -9,7 +9,6 @@ import grpc
 from control.proto import gateway_pb2 as pb2
 from control.proto import gateway_pb2_grpc as pb2_grpc
 import os
-import copy
 
 image = "mytestdevimage"
 image2 = "mytestdevimage2"
@@ -24,6 +23,7 @@ image10 = "mytestdevimage10"
 image11 = "mytestdevimage11"
 image12 = "mytestdevimage12"
 image13 = "mytestdevimage13"
+image14 = "mytestdevimage14"
 pool = "rbd"
 subsystem = "nqn.2016-06.io.spdk:cnode1"
 subsystem2 = "nqn.2016-06.io.spdk:cnode2"
@@ -32,6 +32,8 @@ subsystem4 = "nqn.2016-06.io.spdk:cnode4"
 subsystem5 = "nqn.2016-06.io.spdk:cnode5"
 subsystem6 = "nqn.2016-06.io.spdk:cnode6"
 subsystem7 = "nqn.2016-06.io.spdk:cnode7"
+subsystem8 = "nqn.2016-06.io.spdk:cnode8"
+subsystemX = "nqn.2016-06.io.spdk:cnodeX"
 discovery_nqn = "nqn.2014-08.org.nvmexpress.discovery"
 serial = "Ceph00000000000001"
 uuid = "948878ee-c3b2-4d58-a29b-2cff713fc02d"
@@ -44,6 +46,11 @@ host4 = "nqn.2016-06.io.spdk:host4"
 host5 = "nqn.2016-06.io.spdk:host5"
 host6 = "nqn.2016-06.io.spdk:host6"
 host7 = "nqn.2016-06.io.spdk:host7"
+host8 = "nqn.2016-06.io.spdk:host8"
+host9 = "nqn.2016-06.io.spdk:host9"
+host10 = "nqn.2016-06.io.spdk:host10"
+host11 = "nqn.2016-06.io.spdk:host11"
+hostxx = "nqn.2016-06.io.spdk:hostXX"
 nsid = "1"
 anagrpid = "1"
 anagrpid2 = "2"
@@ -70,6 +77,7 @@ def gateway(config):
     port = config.getint("gateway", "port")
     config.config["gateway"]["group"] = group_name
     config.config["gateway"]["max_namespaces_with_netmask"] = "3"
+    config.config["gateway"]["max_hosts_per_namespace"] = "3"
     config.config["gateway"]["max_subsystems"] = "3"
     config.config["gateway"]["max_namespaces"] = "12"
     config.config["gateway"]["max_namespaces_per_subsystem"] = "11"
@@ -161,7 +169,7 @@ class TestGet:
         assert gw_info.max_namespaces_per_subsystem == 11
         assert gw_info.max_hosts_per_subsystem == 4
         assert gw_info.status == 0
-        assert gw_info.bool_status == True
+        assert gw_info.bool_status
 
 class TestCreate:
     def test_create_subsystem(self, caplog, gateway):
@@ -212,6 +220,9 @@ class TestCreate:
         assert f'"nqn": "{subsystem}"' in caplog.text
         assert f'"max_namespaces": 2049' in caplog.text
         caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem, "--max-namespaces", "2049", "--no-group-append"])
+        assert f"Failure creating subsystem {subsystem}: Subsystem already exists" in caplog.text
+        caplog.clear()
         cli(["subsystem", "add", "--subsystem", subsystem2, "--serial-number", serial, "--no-group-append"])
         assert f"Adding subsystem {subsystem2}: Successful" in caplog.text
         caplog.clear()
@@ -250,6 +261,9 @@ class TestCreate:
         assert subs_list.status == 0
         assert subs_list.subsystems[0].nqn == subsystem
         assert subs_list.subsystems[1].nqn == subsystem2
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem8, "--serial-number", serial, "--no-group-append"])
+        assert f"Failure creating subsystem {subsystem8}: Serial number {serial} is already used by subsystem {subsystem2}" in caplog.text
         caplog.clear()
         subs_list = cli_test(["subsystem", "list"])
         assert subs_list != None
@@ -481,18 +495,109 @@ class TestCreate:
 
     def test_add_host_to_namespace(self, caplog, gateway):
         caplog.clear()
-        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "nqn.2016-06.io.spdk:host8"])
-        assert f"Adding host nqn.2016-06.io.spdk:host8 to namespace 8 on {subsystem}: Successful" in caplog.text
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host8])
+        assert f"Adding host {host8} to namespace 8 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", host8])
+        assert f"Adding host {host8} to namespace 9 on {subsystem}: Successful" in caplog.text
 
     def test_add_too_many_hosts_to_namespace(self, caplog, gateway):
         caplog.clear()
-        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "nqn.2016-06.io.spdk:host9"])
-        assert f"Failure adding host nqn.2016-06.io.spdk:host9 to namespace 8 on {subsystem}, maximal host count for namespace (1) was already reached" in caplog.text
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host9])
+        assert f"Adding host {host9} to namespace 8 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host10])
+        assert f"Adding host {host10} to namespace 8 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host11])
+        assert f"Failure adding host {host11} to namespace 8 on {subsystem}: Maximal host count for namespace (3) was already reached" in caplog.text
 
     def test_add_all_hosts_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "*"])
-        assert f"Failure adding host to namespace 8 on {subsystem}, host can't be \"*\"" in caplog.text
+        assert f"Failure adding host * to namespace 8 on {subsystem}: Host NQN can't be \"*\"" in caplog.text
+
+    def test_change_namespace_visibility(self, caplog, gateway):
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8", "--auto-visible"])
+        assert f"Failure changing visibility for namespace 8 in {subsystem}: Asking to change visibility of namespace to be visible to all hosts while there are already hosts added to it." in caplog.text
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8", "--auto-visible", "--force"])
+        assert f'Asking to change visibility of namespace 8 in {subsystem} to be visible to all hosts while there are already hosts added to it. Will continue as the "--force" parameter was used but these hosts will be removed from the namespace.' in caplog.text
+        assert f'Changing visibility of namespace 8 in {subsystem} to "visible to all hosts": Successful' in caplog.text
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8", "--auto-visible"])
+        assert f'Changing visibility of namespace 8 in {subsystem} to "visible to all hosts": Successful' in caplog.text
+        assert f"No change to namespace 8 in {subsystem} visibility, nothing to do" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "8"])
+        assert f'"nsid": 8' in caplog.text
+        assert f'"auto_visible": true' in caplog.text
+        assert f'"hosts": []' in caplog.text
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host8])
+        assert f"Failure adding host {host8} to namespace 8 on {subsystem}: Namespace is visible to all hosts" in caplog.text
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8", "--no-auto-visible"])
+        assert f'Changing visibility of namespace 8 in {subsystem} to "visible to selected hosts": Successful' in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "8"])
+        assert f'"nsid": 8' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"hosts": []' in caplog.text
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", host8])
+        assert f"Adding host {host8} to namespace 8 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "8"])
+        assert f'"nsid": 8' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"hosts": []' not in caplog.text
+        assert f"{host8}" in caplog.text
+
+    def test_change_namespace_visibility_wrong_params(self, caplog, gateway):
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "Either --auto-visible or --no-auto-visible should be specified" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8", "--auto-visible", "--no-auto-visible"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "--auto-visible and --no-auto-visible are mutually exclusive" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "-8", "--auto-visible"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "nsid value must be positive" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "X8", "--auto-visible"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "argument --nsid: invalid int value" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "28", "--auto-visible"])
+        assert f"Failure changing visibility for namespace 28 in {subsystem}: Can't find namespace" in caplog.text
+        caplog.clear()
+        cli(["namespace", "change_visibility", "--subsystem", subsystemX, "--nsid", "8", "--auto-visible"])
+        assert f"Failure changing visibility for namespace 8 in {subsystemX}: Can't find subsystem" in caplog.text
 
     def test_add_namespace_no_such_subsys(self, caplog, gateway):
         caplog.clear()
@@ -521,43 +626,120 @@ class TestCreate:
     def test_add_discovery_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", discovery_nqn])
-        assert f"Failure adding host to namespace 8 on {subsystem}, host NQN can't be a discovery NQN" in caplog.text
+        assert f"Failure adding host {discovery_nqn} to namespace 8 on {subsystem}: Host NQN can't be a discovery NQN" in caplog.text
 
     def test_add_junk_host_to_namespace(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8", "--host-nqn", "junk"])
-        assert f"Failure adding host junk to namespace 8 on {subsystem}, invalid host NQN" in caplog.text
+        assert f"Failure adding host junk to namespace 8 on {subsystem}: Invalid host NQN" in caplog.text
 
     def test_add_host_to_namespace_junk_subsystem(self, caplog, gateway):
         caplog.clear()
-        cli(["namespace", "add_host", "--subsystem", "junk", "--nsid", "8", "--host-nqn", "nqn.2016-06.io.spdk:hostXX"])
-        assert f"Failure adding host nqn.2016-06.io.spdk:hostXX to namespace 8 on junk, invalid subsystem NQN" in caplog.text
+        cli(["namespace", "add_host", "--subsystem", "junk", "--nsid", "8", "--host-nqn", hostxx])
+        assert f"Failure adding host {hostxx} to namespace 8 on junk: Can't find subsystem" in caplog.text
+
+    def test_add_host_to_namespace_subsystem_not_found(self, caplog, gateway):
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystemX, "--nsid", "8", "--host-nqn", hostxx])
+        assert f"Failure adding host {hostxx} to namespace 8 on {subsystemX}: Can't find subsystem" in caplog.text
 
     def test_add_host_to_wrong_namespace(self, caplog, gateway):
         caplog.clear()
-        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "1", "--host-nqn", "nqn.2016-06.io.spdk:host10"])
-        assert f"Failure adding host nqn.2016-06.io.spdk:host10 to namespace 1 on {subsystem}, namespace is visible to all hosts" in caplog.text
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "1", "--host-nqn", host10])
+        assert f"Failure adding host {host10} to namespace 1 on {subsystem}: Namespace is visible to all hosts" in caplog.text
 
     def test_add_too_many_namespaces_with_hosts(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "add", "--subsystem", subsystem, "--rbd-pool", pool, "--rbd-image", image8, "--size", "16MB", "--rbd-create-image", "--no-auto-visible"])
-        assert f"Failure adding namespace to {subsystem}: Maximal number of namespaces which are not auto visible (3) has already been reached" in caplog.text
+        assert f"Failure adding namespace to {subsystem}: Maximal number of namespaces which are only visible to selected hosts (3) has already been reached" in caplog.text
         caplog.clear()
-        cli(["namespace", "add", "--subsystem", subsystem, "--rbd-pool", pool, "--rbd-image", image8, "--size", "16MB", "--rbd-create-image"])
+        cli(["namespace", "add", "--subsystem", subsystem, "--rbd-pool", pool, "--rbd-image", image14, "--size", "16MB", "--rbd-create-image"])
         assert f"Adding namespace 11 to {subsystem}: Successful" in caplog.text
 
     def test_list_namespace_with_hosts(self, caplog, gateway):
         caplog.clear()
-        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "8"])
-        assert f'"nsid": 8' in caplog.text
-        assert f'"no_auto_visible": true' in caplog.text
-        assert f'"nqn.2016-06.io.spdk:host8"' in caplog.text
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "9"])
+        assert f'"nsid": 9' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"{host8}"' in caplog.text
+        assert f'"hosts": []' not in caplog.text
+
+    def test_del_namespace_host(self, caplog, gateway):
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "-8", "--host-nqn", host8])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "nsid value must be positive" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", "*"])
+        assert f"Failure deleting host * from namespace 9 on {subsystem}: Host NQN can't be \"*\"" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "29", "--host-nqn", host8])
+        assert f"Failure deleting host {host8} from namespace 29 on {subsystem}: Can't find namespace" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "1", "--host-nqn", host8])
+        assert f"Failure deleting host {host8} from namespace 1 on {subsystem}: Namespace is visible to all hosts" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystemX, "--nsid", "9", "--host-nqn", host8])
+        assert f"Failure deleting host {host8} from namespace 9 on {subsystemX}: Can't find subsystem" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "9"])
+        assert f'"nsid": 9' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"{host8}"' in caplog.text
+        assert f'"hosts": []' not in caplog.text
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", host8])
+        assert f"Deleting host {host8} from namespace 9 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "9"])
+        assert f'"nsid": 9' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"{host8}"' not in caplog.text
+        assert f'"hosts": []' in caplog.text
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", hostxx])
+        assert f"Failure deleting host {hostxx} from namespace 9 on {subsystem}: Host is not found in namespace's host list" in caplog.text
+
+    def test_add_namespace_multiple_hosts(self, caplog, gateway):
+        caplog.clear()
+        cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", host8, host9, host10])
+        assert f"Adding host {host8} to namespace 9 on {subsystem}: Successful" in caplog.text
+        assert f"Adding host {host9} to namespace 9 on {subsystem}: Successful" in caplog.text
+        assert f"Adding host {host10} to namespace 9 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "9"])
+        assert f'"nsid": 9' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"{host8}"' in caplog.text
+        assert f'"{host9}"' in caplog.text
+        assert f'"{host10}"' in caplog.text
+        assert f'"hosts": []' not in caplog.text
+
+    def test_del_namespace_multiple_hosts(self, caplog, gateway):
+        caplog.clear()
+        cli(["namespace", "del_host", "--subsystem", subsystem, "--nsid", "9", "--host-nqn", host8, host9, host10])
+        assert f"Deleting host {host8} from namespace 9 on {subsystem}: Successful" in caplog.text
+        assert f"Deleting host {host9} from namespace 9 on {subsystem}: Successful" in caplog.text
+        assert f"Deleting host {host10} from namespace 9 on {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "9"])
+        assert f'"nsid": 9' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+        assert f'"{host8}"' not in caplog.text
+        assert f'"{host9}"' not in caplog.text
+        assert f'"{host10}"' not in caplog.text
+        assert f'"hosts": []' in caplog.text
 
     def test_list_namespace_with_no_hosts(self, caplog, gateway):
         caplog.clear()
         cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "10"])
         assert f'"nsid": 10' in caplog.text
-        assert f'"no_auto_visible": true' in caplog.text
+        assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
         assert f'"hosts": []' in caplog.text
 
     def test_add_too_many_namespaces(self, caplog, gateway):
@@ -773,8 +955,7 @@ class TestCreate:
         assert "error: the following arguments are required: --nsid" in caplog.text
         assert rc == 2
 
-    @pytest.mark.parametrize("host", host_list)
-    def test_add_host(self, caplog, host):
+    def test_host_missing_nqn(self, caplog):
         caplog.clear()
         rc = 0
         try:
@@ -784,6 +965,9 @@ class TestCreate:
             pass
         assert "error: the following arguments are required: --host-nqn/-t" in caplog.text
         assert rc == 2
+
+    @pytest.mark.parametrize("host", host_list)
+    def test_add_host(self, caplog, host):
         caplog.clear()
         cli(["host", "add", "--subsystem", subsystem, "--host-nqn", host])
         if host == "*":
@@ -811,8 +995,11 @@ class TestCreate:
         caplog.clear()
         cli(["host", "add", "--subsystem", subsystem, "--host-nqn", host5, host6, host7])
         assert f"Adding host {host5} to {subsystem}: Successful" in caplog.text
+        assert f"A specific host {host5} was added to subsystem {subsystem} in which all hosts are allowed" in caplog.text
         assert f"Adding host {host6} to {subsystem}: Successful" in caplog.text
+        assert f"A specific host {host6} was added to subsystem {subsystem} in which all hosts are allowed" in caplog.text
         assert f"Adding host {host7} to {subsystem}: Successful" in caplog.text
+        assert f"A specific host {host7} was added to subsystem {subsystem} in which all hosts are allowed" in caplog.text
 
     @pytest.mark.parametrize("listener", listener_list)
     def test_create_listener(self, caplog, listener, gateway):
@@ -1000,11 +1187,11 @@ class TestDelete:
         assert bdev_found
         caplog.clear()
         del_ns_req = pb2.namespace_delete_req(subsystem_nqn=subsystem)
-        ret = stub.namespace_delete(del_ns_req)
+        stub.namespace_delete(del_ns_req)
         assert "Failure deleting namespace, missing NSID" in caplog.text
         caplog.clear()
         del_ns_req = pb2.namespace_delete_req(nsid=1)
-        ret = stub.namespace_delete(del_ns_req)
+        stub.namespace_delete(del_ns_req)
         assert "Failure deleting namespace 1, missing subsystem NQN" in caplog.text
         caplog.clear()
         cli(["namespace", "del", "--subsystem", subsystem, "--nsid", "6"])
