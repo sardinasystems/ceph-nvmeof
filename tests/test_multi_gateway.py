@@ -12,6 +12,7 @@ from control.proto import gateway_pb2_grpc as pb2_grpc
 update_notify = True
 update_interval_sec = 5
 
+
 @pytest.fixture(scope="module")
 def conn(config):
     """Sets up and tears down Gateways A and B."""
@@ -36,12 +37,15 @@ def conn(config):
     ceph_utils = CephUtils(config)
 
     # Start servers
-    with (
-       GatewayServer(configA) as gatewayA,
-       GatewayServer(configB) as gatewayB,
-    ):
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{gatewayA.name}", "pool": "{pool}", "group": "Group1"' + "}")
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", "pool": "{pool}", "group": "Group1"' + "}")
+    with GatewayServer(configA) as gatewayA, GatewayServer(configB) as gatewayB:
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{gatewayA.name}", "pool": "{pool}", '
+            f'"group": "Group1"' + "}"
+        )
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", "pool": "{pool}", '
+            f'"group": "Group1"' + "}"
+        )
         gatewayA.serve()
         # Delete existing OMAP state
         gatewayA.gateway_rpc.gateway_state.delete_state()
@@ -60,6 +64,7 @@ def conn(config):
         gatewayB.server.stop(grace=1)
         gatewayB.gateway_rpc.gateway_state.delete_state()
 
+
 def test_multi_gateway_coordination(config, image, conn):
     """Tests state coordination in a gateway group.
 
@@ -77,12 +82,13 @@ def test_multi_gateway_coordination(config, image, conn):
 
     # Send requests to create a subsystem with one namespace to GatewayA
     subsystem_req = pb2.create_subsystem_req(subsystem_nqn=nqn, max_namespaces=256,
-                                             serial_number=serial, enable_ha=True, no_group_append=True)
+                                             serial_number=serial, enable_ha=True,
+                                             no_group_append=True)
     namespace_req = pb2.namespace_add_req(subsystem_nqn=nqn,
                                           rbd_pool_name=pool,
                                           rbd_image_name=image,
                                           block_size=4096,
-                                          nsid=nsid, create_image=True, size=16*1024*1024)
+                                          nsid=nsid, create_image=True, size=16 * 1024 * 1024)
     list_subsystems_req = pb2.list_subsystems_req()
     list_namespaces_req = pb2.list_namespaces_req(subsystem=nqn)
     ret_subsystem = stubA.create_subsystem(subsystem_req)
@@ -104,9 +110,9 @@ def test_multi_gateway_coordination(config, image, conn):
             stubB.list_subsystems(list_subsystems_req),
             preserving_proto_field_name=True, including_default_value_fields=True))['subsystems']
         assert len(listB) == num_subsystems
-        assert listB[num_subsystems-1]["nqn"] == nqn
-        assert listB[num_subsystems-1]["serial_number"] == serial
-        assert listB[num_subsystems-1]["namespace_count"] == 1
+        assert listB[num_subsystems - 1]["nqn"] == nqn
+        assert listB[num_subsystems - 1]["serial_number"] == serial
+        assert listB[num_subsystems - 1]["namespace_count"] == 1
 
         nsListB = json.loads(json_format.MessageToJson(
             stubB.list_namespaces(list_namespaces_req),
@@ -123,9 +129,9 @@ def test_multi_gateway_coordination(config, image, conn):
         stubB.list_subsystems(list_subsystems_req),
         preserving_proto_field_name=True, including_default_value_fields=True))['subsystems']
     assert len(listB) == num_subsystems
-    assert listB[num_subsystems-1]["nqn"] == nqn
-    assert listB[num_subsystems-1]["serial_number"] == serial
-    assert listB[num_subsystems-1]["namespace_count"] == 1
+    assert listB[num_subsystems - 1]["nqn"] == nqn
+    assert listB[num_subsystems - 1]["serial_number"] == serial
+    assert listB[num_subsystems - 1]["namespace_count"] == 1
     nsListB = json.loads(json_format.MessageToJson(
         stubB.list_namespaces(list_namespaces_req),
         preserving_proto_field_name=True, including_default_value_fields=True))['namespaces']
@@ -134,4 +140,3 @@ def test_multi_gateway_coordination(config, image, conn):
     assert nsListB[0]["uuid"] == uuid
     assert nsListB[0]["rbd_image_name"] == image
     assert nsListB[0]["rbd_pool_name"] == pool
-

@@ -23,6 +23,7 @@ key4 = "DHHC-1:01:x7ecfGgIdOEl+J5cJ9JcZHOS2By2Me6eDJUnrsT9MVrCWRYV:"
 hostpsk1 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
 config = "ceph-nvmeof.conf"
 
+
 @pytest.fixture(scope="module")
 def two_gateways(config):
     """Sets up and tears down two Gateways"""
@@ -51,8 +52,12 @@ def two_gateways(config):
 
     ceph_utils = CephUtils(config)
     with (GatewayServer(configA) as gatewayA, GatewayServer(configB) as gatewayB):
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{nameA}", "pool": "{pool}", "group": ""' + "}")
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{nameB}", "pool": "{pool}", "group": ""' + "}")
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{nameA}", "pool": "{pool}", "group": ""' + "}"
+        )
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{nameB}", "pool": "{pool}", "group": ""' + "}"
+        )
         gatewayA.serve()
         gatewayB.serve()
 
@@ -67,6 +72,7 @@ def two_gateways(config):
         gatewayA.server.stop(grace=1)
         gatewayB.server.stop(grace=1)
 
+
 def test_change_host_key(caplog, two_gateways):
     gatewayA, stubA, gatewayB, stubB = two_gateways
     caplog.clear()
@@ -78,20 +84,28 @@ def test_change_host_key(caplog, two_gateways):
     caplog.clear()
     cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn2, "--dhchap-key", key1])
     assert f"Adding host {hostnqn2} to {subsystem}: Successful" in caplog.text
-    assert f"Host {hostnqn2} has a DH-HMAC-CHAP key but subsystem {subsystem} has no key, a unidirectional authentication will be used" in caplog.text
+    assert f"Host {hostnqn2} has a DH-HMAC-CHAP key but subsystem {subsystem} has no key, " \
+           f"a unidirectional authentication will be used" in caplog.text
     caplog.clear()
-    cli(["host", "change_key", "--subsystem", subsystem, "--host-nqn", hostnqn1, "--dhchap-key", key2])
+    cli(["host", "change_key", "--subsystem", subsystem,
+         "--host-nqn", hostnqn1, "--dhchap-key", key2])
     assert f"Changing key for host {hostnqn1} on subsystem {subsystem}: Successful" in caplog.text
-    assert f"Host {hostnqn1} has a DH-HMAC-CHAP key but subsystem {subsystem} has no key, a unidirectional authentication will be used" in caplog.text
+    assert f"Host {hostnqn1} has a DH-HMAC-CHAP key but subsystem {subsystem} has no key, " \
+           f"a unidirectional authentication will be used" in caplog.text
     time.sleep(15)
-    assert f"Received request to change inband authentication key for host {hostnqn1} on subsystem {subsystem}, dhchap: {key2}, context: <grpc._server" in caplog.text
-    assert f"Received request to change inband authentication key for host {hostnqn1} on subsystem {subsystem}, dhchap: {key2}, context: None" in caplog.text
+    assert f"Received request to change inband authentication key for host {hostnqn1} on " \
+           f"subsystem {subsystem}, dhchap: {key2}, context: <grpc._server" in caplog.text
+    assert f"Received request to change inband authentication key for host {hostnqn1} on " \
+           f"subsystem {subsystem}, dhchap: {key2}, context: None" in caplog.text
     assert f"Received request to remove host {hostnqn1} access from {subsystem}" not in caplog.text
     assert f"Received request to add host {hostnqn1} to {subsystem}" not in caplog.text
     caplog.clear()
-    cli(["host", "change_key", "--subsystem", subsystem, "--host-nqn", hostnqn2, "--dhchap-key", key3])
+    cli(["host", "change_key", "--subsystem", subsystem,
+         "--host-nqn", hostnqn2, "--dhchap-key", key3])
     time.sleep(15)
-    assert f"Received request to change inband authentication key for host {hostnqn2} on subsystem {subsystem}, dhchap: {key3}, context: <grpc._server" in caplog.text
-    assert f"Received request to change inband authentication key for host {hostnqn2} on subsystem {subsystem}, dhchap: {key3}, context: None" in caplog.text
+    assert f"Received request to change inband authentication key for host {hostnqn2} on " \
+           f"subsystem {subsystem}, dhchap: {key3}, context: <grpc._server" in caplog.text
+    assert f"Received request to change inband authentication key for host {hostnqn2} on " \
+           f"subsystem {subsystem}, dhchap: {key3}, context: None" in caplog.text
     assert f"Received request to remove host {hostnqn2} access from {subsystem}" not in caplog.text
     assert f"Received request to add host {hostnqn2} to {subsystem}" not in caplog.text

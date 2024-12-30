@@ -10,6 +10,7 @@
 import configparser
 import os
 
+
 class GatewayConfig:
     """Loads and returns config file settings.
 
@@ -59,12 +60,14 @@ class GatewayConfig:
             logger.info(f"Using configuration file {self.filepath}")
             with open(self.filepath) as f:
                 logger.info(
-                    f"====================================== Configuration file content ======================================")
+                    "====================================== Configuration file content "
+                    "======================================")
                 for line in f:
                     line = line.rstrip()
                     logger.info(f"{line}")
                 logger.info(
-                    f"========================================================================================================")
+                    "========================================================="
+                    "===============================================")
                 self.conffile_logged = True
         except Exception:
             pass

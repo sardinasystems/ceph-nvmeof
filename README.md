@@ -38,6 +38,12 @@ sudo groupadd docker
 sudo usermod -aG docker $USER
 ```
 
+In order to use the "make verify" option to validate the Python source files you need to have flake8 installed on the build machine:
+
+```bash
+pip install flake8
+```
+
 ### Steps
 
 To launch a containerized environment with a Ceph cluster and a NVMe-oF gateway (this is not the [prescribed deployment for production purposes](https://docs.ceph.com/en/quincy/install/#recommended-methods), but for testing and development tasks alone):
@@ -473,6 +479,7 @@ Targets:
 
   Miscellaneous:
       alias           Print bash alias command for the nvmeof-cli. Usage: "eval $(make alias)"
+      verify          Run flake8 on the Python source files
 ```
 
 Targets may accept options: `make run SVC=nvme OPTS=--entrypoint=bash`.

@@ -1,4 +1,3 @@
-import pytest
 import copy
 import grpc
 import json
@@ -8,15 +7,15 @@ from control.server import GatewayServer
 from control.cephutils import CephUtils
 from control.proto import gateway_pb2 as pb2
 from control.proto import gateway_pb2_grpc as pb2_grpc
-import spdk.rpc.bdev as rpc_bdev
 
 image = "mytestdevimage"
 pool = "rbd"
 subsystem_prefix = "nqn.2016-06.io.spdk:cnode"
 host_nqn_prefix = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b"
 
-def setup_config(config, gw1_name, gw2_name, gw_group, update_notify, update_interval_sec, disable_unlock, lock_duration,
-                 sock1_name, sock2_name):
+
+def setup_config(config, gw1_name, gw2_name, gw_group, update_notify, update_interval_sec,
+                 disable_unlock, lock_duration, sock1_name, sock2_name):
     """Sets up the config objects for gateways A and B """
 
     configA = copy.deepcopy(config)
@@ -40,9 +39,16 @@ def setup_config(config, gw1_name, gw2_name, gw_group, update_notify, update_int
 
     return configA, configB
 
+
 def start_servers(gatewayA, gatewayB, gw_group, addr, portA, portB, ceph_utils):
-    ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{gatewayA.name}", "pool": "{pool}", "group": "{gw_group}"' + "}")
-    ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", "pool": "{pool}", "group": "{gw_group}"' + "}")
+    ceph_utils.execute_ceph_monitor_command(
+        "{" + f'"prefix":"nvme-gw create", "id": "{gatewayA.name}", '
+        f'"pool": "{pool}", "group": "{gw_group}"' + "}"
+    )
+    ceph_utils.execute_ceph_monitor_command(
+        "{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", '
+        f'"pool": "{pool}", "group": "{gw_group}"' + "}"
+    )
     gatewayA.serve()
     # Delete existing OMAP state
     gatewayA.gateway_rpc.gateway_state.delete_state()
@@ -58,10 +64,12 @@ def start_servers(gatewayA, gatewayB, gw_group, addr, portA, portB, ceph_utils):
 
     return stubA, stubB
 
+
 def test_multi_gateway_namespace_ids(config, image, caplog):
     """Tests NSID are OK after a gateway restart
     """
-    configA, configB = setup_config(config, "GatewayAAA", "GatewayBBB", "Group1", True, 5, False, 60,
+    configA, configB = setup_config(config, "GatewayAAA", "GatewayBBB", "Group1", True, 5,
+                                    False, 60,
                                     "spdk_GatewayAAA.sock", "spdk_GatewayBBB.sock")
 
     addr = configA.get("gateway", "addr")
@@ -69,22 +77,24 @@ def test_multi_gateway_namespace_ids(config, image, caplog):
     portB = configB.getint("gateway", "port")
     ceph_utils = CephUtils(config)
     # Start servers
-    with (
-       GatewayServer(configA) as gatewayA,
-       GatewayServer(configB) as gatewayB,
-    ):
+    with GatewayServer(configA) as gatewayA, GatewayServer(configB) as gatewayB:
         stubA, stubB = start_servers(gatewayA, gatewayB, "Group1", addr, portA, portB, ceph_utils)
 
         # Send requests to create a subsystem on GatewayA
         caplog.clear()
         subsystem = f"{subsystem_prefix}PPP"
-        subsystem_add_req = pb2.create_subsystem_req(subsystem_nqn=subsystem, max_namespaces=256, no_group_append=True)
+        subsystem_add_req = pb2.create_subsystem_req(subsystem_nqn=subsystem,
+                                                     max_namespaces=256,
+                                                     no_group_append=True)
         ret_subsystem = stubA.create_subsystem(subsystem_add_req)
         assert ret_subsystem.status != 0
         assert "HA must be enabled for subsystems" in caplog.text
         caplog.clear()
         subsystem = f"{subsystem_prefix}WWW"
-        subsystem_add_req = pb2.create_subsystem_req(subsystem_nqn=subsystem, max_namespaces=256, enable_ha=True, no_group_append=True)
+        subsystem_add_req = pb2.create_subsystem_req(subsystem_nqn=subsystem,
+                                                     max_namespaces=256,
+                                                     enable_ha=True,
+                                                     no_group_append=True)
         ret_subsystem = stubA.create_subsystem(subsystem_add_req)
         assert ret_subsystem.status == 0
         assert f"create_subsystem {subsystem}: True" in caplog.text
@@ -93,14 +103,22 @@ def test_multi_gateway_namespace_ids(config, image, caplog):
         caplog.clear()
         # Send requests to create a namespace on GatewayA
         namespace_req = pb2.namespace_add_req(subsystem_nqn=subsystem,
-                                              rbd_pool_name=pool, rbd_image_name=f"{image}WWW", block_size=4096,
-                                              create_image=True, size=16*1024*1024, force=True)
+                                              rbd_pool_name=pool,
+                                              rbd_image_name=f"{image}WWW",
+                                              block_size=4096,
+                                              create_image=True,
+                                              size=16 * 1024 * 1024,
+                                              force=True)
         ret_ns = stubA.namespace_add(namespace_req)
         assert ret_ns.status == 0
         time.sleep(10)
         namespace_req2 = pb2.namespace_add_req(subsystem_nqn=subsystem,
-                                              rbd_pool_name=pool, rbd_image_name=f"{image}EEE", block_size=4096,
-                                              create_image=True, size=16*1024*1024, force=True)
+                                               rbd_pool_name=pool,
+                                               rbd_image_name=f"{image}EEE",
+                                               block_size=4096,
+                                               create_image=True,
+                                               size=16 * 1024 * 1024,
+                                               force=True)
         ret_ns = stubA.namespace_add(namespace_req2)
         assert ret_ns.status == 0
         time.sleep(10)
@@ -153,7 +171,10 @@ def test_multi_gateway_namespace_ids(config, image, caplog):
             assert False
         gatewayB.__exit__(None, None, None)
         gatewayB = GatewayServer(configB)
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", "pool": "{pool}", "group": "Group1"' + "}")
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{gatewayB.name}", "pool": "{pool}", '
+            f'"group": "Group1"' + "}"
+        )
         gatewayB.serve()
         channelB = grpc.insecure_channel(f"{addr}:{portB}")
         stubB = pb2_grpc.GatewayStub(channelB)

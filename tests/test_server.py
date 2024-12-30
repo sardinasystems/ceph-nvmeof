@@ -7,9 +7,10 @@ import os
 import unittest
 from control.server import GatewayServer
 
+
 class TestServer(unittest.TestCase):
     # Location of core files in test env.
-    core_dir="/tmp/coredump"
+    core_dir = "/tmp/coredump"
 
     @pytest.fixture(autouse=True)
     def _config(self, config):
@@ -18,11 +19,11 @@ class TestServer(unittest.TestCase):
     def validate_exception(self, e):
         pattern = r'Gateway subprocess terminated pid=(\d+) exit_code=(-?\d+)'
         m = re.match(pattern, e.code)
-        assert(m)
+        assert m
         pid = int(m.group(1))
         code = int(m.group(2))
-        assert(pid > 0)
-        assert(code)
+        assert pid > 0
+        assert code
 
     def remove_core_files(self, directory_path):
         # List all files starting with "core." in the core directory
@@ -38,9 +39,12 @@ class TestServer(unittest.TestCase):
             print(f"Removed: {file_path}")
 
     def assert_no_core_files(self, directory_path):
-        assert(os.path.exists(directory_path) and os.path.isdir(directory_path))
-        files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.startswith("core.")]
-        assert(len(files) == 0)
+        assert os.path.exists(directory_path) and os.path.isdir(directory_path)
+        files = [
+            f for f in os.listdir(directory_path)
+            if os.path.isfile(os.path.join(directory_path, f)) and f.startswith("core.")
+        ]
+        assert len(files) == 0
 
     def test_spdk_exception(self):
         """Tests spdk sub process exiting with error."""
@@ -62,13 +66,13 @@ class TestServer(unittest.TestCase):
             gateway.serve()
             time.sleep(10)
         # exited context, sub processes should terminate gracefully
-        time.sleep(10) # let it dump
+        time.sleep(10)     # let it dump
         self.assert_no_core_files(self.core_dir)
 
     def test_monc_exit(self):
         """Tests monitor client sub process abort."""
         config_monc_abort = copy.deepcopy(self.config)
-        signals = [ signal.SIGABRT, signal.SIGTERM, signal.SIGKILL ]
+        signals = [signal.SIGABRT, signal.SIGTERM, signal.SIGKILL]
 
         for sig in signals:
             with self.assertRaises(SystemExit) as cm:
@@ -80,7 +84,7 @@ class TestServer(unittest.TestCase):
                     time.sleep(2)
 
                     # Send SIGABRT (abort signal) to the monitor client process
-                    assert(gateway.monitor_client_process)
+                    assert gateway.monitor_client_process
                     gateway.monitor_client_process.send_signal(signal.SIGABRT)
 
                     # Block on running keep alive ping
@@ -106,15 +110,13 @@ class TestServer(unittest.TestCase):
         configB.config["spdk"]["tgt_cmd_extra_args"] = "-m 0x343435545"
 
         with self.assertRaises(SystemExit) as cm:
-            with (
-                GatewayServer(configA) as gatewayA,
-                GatewayServer(configB) as gatewayB,
-             ):
+            with GatewayServer(configA) as gatewayA, GatewayServer(configB) as gatewayB:
                 gatewayA.set_group_id(0)
                 gatewayA.serve()
                 gatewayB.set_group_id(1)
                 gatewayB.serve()
         self.validate_exception(cm.exception)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -20,6 +20,7 @@ from .utils import GatewayUtils
 from google.protobuf import json_format
 from .proto import gateway_pb2 as pb2
 
+
 class GatewayState(ABC):
     """Persists gateway NVMeoF target state.
 
@@ -70,11 +71,12 @@ class GatewayState(ABC):
             key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
         return key
 
-    def build_namespace_host_key(subsystem_nqn: str, nsid, host : str) -> str:
+    def build_namespace_host_key(subsystem_nqn: str, nsid, host: str) -> str:
         key = GatewayState.NAMESPACE_HOST_PREFIX + subsystem_nqn
         if nsid is not None:
             key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
-            key += GatewayState.OMAP_KEY_DELIMITER + host
+            if host:
+                key += GatewayState.OMAP_KEY_DELIMITER + host
         return key
 
     def build_subsystem_key(subsystem_nqn: str) -> str:
@@ -103,13 +105,20 @@ class GatewayState(ABC):
 
     def build_listener_key_suffix(host: str, trtype: str, traddr: str, trsvcid: int) -> str:
         if host:
-            return GatewayState.OMAP_KEY_DELIMITER + host + GatewayState.OMAP_KEY_DELIMITER + trtype + GatewayState.OMAP_KEY_DELIMITER + traddr + GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
+            return GatewayState.OMAP_KEY_DELIMITER + host + \
+                GatewayState.OMAP_KEY_DELIMITER + trtype + GatewayState.OMAP_KEY_DELIMITER + \
+                traddr + GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
         if trtype:
-            return GatewayState.OMAP_KEY_DELIMITER + trtype + GatewayState.OMAP_KEY_DELIMITER + traddr + GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
-        return GatewayState.OMAP_KEY_DELIMITER + traddr + GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
+            return GatewayState.OMAP_KEY_DELIMITER + trtype + \
+                GatewayState.OMAP_KEY_DELIMITER + traddr + \
+                GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
+        return GatewayState.OMAP_KEY_DELIMITER + traddr + \
+            GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
 
-    def build_listener_key(subsystem_nqn: str, host: str, trtype: str, traddr: str, trsvcid: int) -> str:
-        return GatewayState.build_partial_listener_key(subsystem_nqn, host) + GatewayState.build_listener_key_suffix(None, trtype, traddr, str(trsvcid))
+    def build_listener_key(subsystem_nqn: str, host: str, trtype: str,
+                           traddr: str, trsvcid: int) -> str:
+        return GatewayState.build_partial_listener_key(subsystem_nqn, host) + \
+            GatewayState.build_listener_key_suffix(None, trtype, traddr, str(trsvcid))
 
     @abstractmethod
     def get_state(self) -> Dict[str, str]:
@@ -139,8 +148,14 @@ class GatewayState(ABC):
         # Delete all keys related to the namespace
         state = self.get_state()
         for key in state.keys():
-            if (key.startswith(GatewayState.build_namespace_qos_key(subsystem_nqn, nsid)) or
-                    key.startswith(GatewayState.build_namespace_host_key(subsystem_nqn, nsid, ""))):
+            # Separate if to several statements to keep flake8 happy
+            if key.startswith(GatewayState.build_namespace_qos_key(subsystem_nqn, nsid)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_host_key(subsystem_nqn, nsid, "")):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_visibility_key(subsystem_nqn, nsid)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_lbgroup_key(subsystem_nqn, nsid)):
                 self._remove_key(key)
 
     def add_namespace_qos(self, subsystem_nqn: str, nsid: str, val: str):
@@ -153,12 +168,12 @@ class GatewayState(ABC):
         key = GatewayState.build_namespace_qos_key(subsystem_nqn, nsid)
         self._remove_key(key)
 
-    def add_namespace_host(self, subsystem_nqn: str, nsid: str, host : str, val: str):
+    def add_namespace_host(self, subsystem_nqn: str, nsid: str, host: str, val: str):
         """Adds namespace's host to the state data store."""
         key = GatewayState.build_namespace_host_key(subsystem_nqn, nsid, host)
         self._add_key(key, val)
 
-    def remove_namespace_host(self, subsystem_nqn: str, nsid: str, host : str):
+    def remove_namespace_host(self, subsystem_nqn: str, nsid: str, host: str):
         """Removes namespace's host from the state data store."""
         key = GatewayState.build_namespace_host_key(subsystem_nqn, nsid, host)
         self._remove_key(key)
@@ -176,11 +191,24 @@ class GatewayState(ABC):
         # Delete all keys related to subsystem
         state = self.get_state()
         for key in state.keys():
-            if (key.startswith(GatewayState.build_namespace_key(subsystem_nqn, None)) or
-                    key.startswith(GatewayState.build_namespace_qos_key(subsystem_nqn, None)) or
-                    key.startswith(GatewayState.build_namespace_host_key(subsystem_nqn, None, "")) or
-                    key.startswith(GatewayState.build_host_key(subsystem_nqn, None)) or
-                    key.startswith(GatewayState.build_partial_listener_key(subsystem_nqn, None))):
+            # Separate if to several statements to keep flake8 happy
+            if key.startswith(GatewayState.build_namespace_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_qos_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_host_key(subsystem_nqn, None, "")):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_visibility_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_namespace_lbgroup_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_host_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_host_key_key(subsystem_nqn, None)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_subsystem_key_key(subsystem_nqn)):
+                self._remove_key(key)
+            elif key.startswith(GatewayState.build_partial_listener_key(subsystem_nqn, None)):
                 self._remove_key(key)
 
     def add_host(self, subsystem_nqn: str, host_nqn: str, val: str):
@@ -195,12 +223,20 @@ class GatewayState(ABC):
         if key in state.keys():
             self._remove_key(key)
 
-    def add_listener(self, subsystem_nqn: str, gateway: str, trtype: str, traddr: str, trsvcid: int, val: str):
+        # Delete all keys related to the host
+        state = self.get_state()
+        for key in state.keys():
+            if key.startswith(GatewayState.build_host_key_key(subsystem_nqn, host_nqn)):
+                self._remove_key(key)
+
+    def add_listener(self, subsystem_nqn: str, gateway: str, trtype: str,
+                     traddr: str, trsvcid: int, val: str):
         """Adds a listener to the state data store."""
         key = GatewayState.build_listener_key(subsystem_nqn, gateway, trtype, traddr, trsvcid)
         self._add_key(key, val)
 
-    def remove_listener(self, subsystem_nqn: str, gateway: str, trtype: str, traddr: str, trsvcid: int):
+    def remove_listener(self, subsystem_nqn: str, gateway: str, trtype: str,
+                        traddr: str, trsvcid: int):
         """Removes a listener from the state data store."""
         state = self.get_state()
         key = GatewayState.build_listener_key(subsystem_nqn, gateway, trtype, traddr, trsvcid)
@@ -243,6 +279,7 @@ class LocalGatewayState(GatewayState):
         """Resets dictionary with OMAP state."""
         self.state = omap_state
 
+
 class ReleasedLock:
     def __init__(self, lock: threading.Lock):
         self.lock = lock
@@ -255,6 +292,7 @@ class ReleasedLock:
     def __exit__(self, exc_type, exc_value, traceback):
         self.lock.acquire()
 
+
 class OmapLock:
     OMAP_FILE_LOCK_NAME = "omap_file_lock"
     OMAP_FILE_LOCK_COOKIE = "omap_file_cookie"
@@ -265,23 +303,39 @@ class OmapLock:
         self.gateway_state = gateway_state
         self.rpc_lock = rpc_lock
         self.is_locked = False
-        self.omap_file_lock_duration = self.omap_state.config.getint_with_default("gateway", "omap_file_lock_duration", 20)
-        self.omap_file_update_reloads = self.omap_state.config.getint_with_default("gateway", "omap_file_update_reloads", 10)
-        self.omap_file_lock_retries = self.omap_state.config.getint_with_default("gateway", "omap_file_lock_retries", 30)
-        self.omap_file_lock_retry_sleep_interval = self.omap_state.config.getfloat_with_default("gateway",
-                                                                                    "omap_file_lock_retry_sleep_interval", 1.0)
+        self.omap_file_lock_duration = self.omap_state.config.getint_with_default(
+            "gateway",
+            "omap_file_lock_duration",
+            20)
+        self.omap_file_update_reloads = self.omap_state.config.getint_with_default(
+            "gateway",
+            "omap_file_update_reloads",
+            10)
+        self.omap_file_lock_retries = self.omap_state.config.getint_with_default(
+            "gateway",
+            "omap_file_lock_retries",
+            30)
+        self.omap_file_lock_retry_sleep_interval = self.omap_state.config.getfloat_with_default(
+            "gateway",
+            "omap_file_lock_retry_sleep_interval",
+            1.0)
         self.lock_start_time = 0.0
-        # This is used for testing purposes only. To allow us testing locking from two gateways at the same time
-        self.omap_file_disable_unlock = self.omap_state.config.getboolean_with_default("gateway", "omap_file_disable_unlock", False)
+        # This is used for testing purposes only. To allow us testing locking
+        # from two gateways at the same time
+        self.omap_file_disable_unlock = self.omap_state.config.getboolean_with_default(
+            "gateway",
+            "omap_file_disable_unlock",
+            False)
         if self.omap_file_disable_unlock:
-            self.logger.warning(f"Will not unlock OMAP file for testing purposes")
+            self.logger.warning("Will not unlock OMAP file for testing purposes")
 
     #
-    # We pass the context from the different functions here. It should point to a real object in case we come from a real
-    # resource changing function, resulting from a CLI command. It will be None in case we come from an automatic update
-    # which is done because the local state is out of date. In case context is None, that is we're in the middle of an update
-    # we should not try to lock the OMAP file as the code will not try to make changes there, only the local spdk calls
-    # are done in such a case.
+    # We pass the context from the different functions here. It should point to a real object
+    # in case we come from a real resource changing function, resulting from a CLI command. It
+    # will be None in case we come from an automatic update which is done because the local
+    # state is out of date. In case context is None, that is we're in the middle of an update
+    # we should not try to lock the OMAP file as the code will not try to make changes there,
+    # only the local spdk calls are done in such a case.
     #
     def __enter__(self):
         if self.omap_file_lock_duration > 0:
@@ -297,7 +351,8 @@ class OmapLock:
             self.lock_start_time = 0.0
             self.unlock_omap()
             if duration > self.omap_file_lock_duration:
-                self.logger.error(f"Operation ran for {duration:.2f} seconds, but the OMAP lock expired after {self.omap_file_lock_duration} seconds")
+                self.logger.error(f"Operation ran for {duration:.2f} seconds, but the OMAP "
+                                  f"lock expired after {self.omap_file_lock_duration} seconds")
 
     def get_omap_lock_to_use(self, context):
         if context:
@@ -328,39 +383,45 @@ class OmapLock:
                     time.sleep(1)
 
         if need_to_update:
-            raise Exception(f"Unable to lock OMAP file after reloading {self.omap_file_update_reloads} times, exiting")
+            raise Exception(f"Unable to lock OMAP file after reloading "
+                            f"{self.omap_file_update_reloads} times, exiting")
 
     def lock_omap(self):
         got_lock = False
         assert self.rpc_lock.locked(), "The RPC lock is not locked."
 
         if not self.omap_state.ioctx:
-            self.logger.warning(f"Not locking OMAP as Rados connection is closed")
+            self.logger.warning("Not locking OMAP as Rados connection is closed")
             raise Exception("An attempt to lock OMAP file after Rados connection was closed")
 
         for i in range(0, self.omap_file_lock_retries + 1):
             try:
-                self.omap_state.ioctx.lock_exclusive(self.omap_state.omap_name, self.OMAP_FILE_LOCK_NAME,
-                                         self.OMAP_FILE_LOCK_COOKIE, "OMAP file changes lock", self.omap_file_lock_duration, 0)
+                self.omap_state.ioctx.lock_exclusive(self.omap_state.omap_name,
+                                                     self.OMAP_FILE_LOCK_NAME,
+                                                     self.OMAP_FILE_LOCK_COOKIE,
+                                                     "OMAP file changes lock",
+                                                     self.omap_file_lock_duration, 0)
                 got_lock = True
                 if i > 0:
                     self.logger.info(f"Succeeded to lock OMAP file after {i} retries")
                 break
             except rados.ObjectExists:
-                self.logger.info(f"We already locked the OMAP file")
+                self.logger.info("We already locked the OMAP file")
                 got_lock = True
                 break
             except rados.ObjectBusy:
                 self.logger.warning(
-                       f"The OMAP file is locked, will try again in {self.omap_file_lock_retry_sleep_interval} seconds")
+                    f"The OMAP file is locked, will try again in "
+                    f"{self.omap_file_lock_retry_sleep_interval} seconds")
                 with ReleasedLock(self.rpc_lock):
                     time.sleep(self.omap_file_lock_retry_sleep_interval)
             except Exception:
-                self.logger.exception(f"Unable to lock OMAP file, exiting")
+                self.logger.exception("Unable to lock OMAP file, exiting")
                 raise
 
         if not got_lock:
-            self.logger.error(f"Unable to lock OMAP file after {self.omap_file_lock_retries} tries. Exiting!")
+            self.logger.error(f"Unable to lock OMAP file after {self.omap_file_lock_retries} "
+                              f"tries. Exiting!")
             raise Exception("Unable to lock OMAP file")
 
         self.is_locked = True
@@ -368,15 +429,17 @@ class OmapLock:
         local_version = self.omap_state.get_local_version()
 
         if omap_version > local_version:
-            self.logger.warning(
-                       f"Local version {local_version} differs from OMAP file version {omap_version}."
-                       f" The file is not current, will reload it and try again")
+            self.logger.warning(f"Local version {local_version} differs from OMAP file "
+                                f"version {omap_version}. The file is not current, will "
+                                f"reload it and try again")
             self.unlock_omap()
-            raise OSError(errno.EAGAIN, "Unable to lock OMAP file, file not current", self.omap_state.omap_name)
+            raise OSError(errno.EAGAIN,
+                          "Unable to lock OMAP file, file not current",
+                          self.omap_state.omap_name)
 
     def unlock_omap(self):
         if self.omap_file_disable_unlock:
-            self.logger.warning(f"OMAP file unlock was disabled, will not unlock file")
+            self.logger.warning("OMAP file unlock was disabled, will not unlock file")
             return
 
         if not self.omap_state.ioctx:
@@ -384,17 +447,20 @@ class OmapLock:
             return
 
         try:
-            self.omap_state.ioctx.unlock(self.omap_state.omap_name, self.OMAP_FILE_LOCK_NAME, self.OMAP_FILE_LOCK_COOKIE)
+            self.omap_state.ioctx.unlock(self.omap_state.omap_name,
+                                         self.OMAP_FILE_LOCK_NAME,
+                                         self.OMAP_FILE_LOCK_COOKIE)
         except rados.ObjectNotFound:
             if self.is_locked:
-                self.logger.warning(f"No such lock, the lock duration might have passed")
+                self.logger.warning("No such lock, the lock duration might have passed")
         except Exception:
-            self.logger.exception(f"Unable to unlock OMAP file")
+            self.logger.exception("Unable to unlock OMAP file")
             pass
         self.is_locked = False
 
     def locked(self):
         return self.is_locked
+
 
 class OmapGatewayState(GatewayState):
     """Persists gateway NVMeoF target state to an OMAP object.
@@ -424,7 +490,9 @@ class OmapGatewayState(GatewayState):
         self.watch = None
         gateway_group = self.config.get("gateway", "group")
         self.omap_name = f"nvmeof.{gateway_group}.state" if gateway_group else "nvmeof.state"
-        self.notify_timeout = self.config.getint_with_default("gateway", "state_update_timeout_in_msec", 2000)
+        self.notify_timeout = self.config.getint_with_default("gateway",
+                                                              "state_update_timeout_in_msec",
+                                                              2000)
         self.conn = None
         self.id_text = id_text
 
@@ -442,7 +510,7 @@ class OmapGatewayState(GatewayState):
         except rados.ObjectExists:
             self.logger.info(f"{self.omap_name} OMAP object already exists.")
         except Exception:
-            self.logger.exception(f"Unable to create OMAP, exiting!")
+            self.logger.exception("Unable to create OMAP, exiting!")
             raise
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -451,8 +519,9 @@ class OmapGatewayState(GatewayState):
     def check_for_old_format_omap_files(self):
         omap_dict = self.get_state()
         for omap_item_key in omap_dict.keys():
-           if omap_item_key.startswith("bdev"):
-               raise Exception("Old OMAP file format, still contains bdevs, please remove file and try again")
+            if omap_item_key.startswith("bdev"):
+                raise Exception("Old OMAP file format, still contains bdevs, please "
+                                "remove file and try again")
 
     def open_rados_connection(self, config):
         ceph_pool = config.get("ceph", "pool")
@@ -475,7 +544,7 @@ class OmapGatewayState(GatewayState):
     def get_omap_version(self) -> int:
         """Returns OMAP version."""
         if not self.ioctx:
-            self.logger.warning(f"Trying to get OMAP version when Rados connection is closed")
+            self.logger.warning("Trying to get OMAP version when Rados connection is closed")
             return -1
 
         with rados.ReadOpCtx() as read_op:
@@ -497,9 +566,10 @@ class OmapGatewayState(GatewayState):
         omap_list = [("", 0)]   # Dummy, non empty, list value. Just so we would enter the while
         omap_dict = {}
         if not self.ioctx:
-            self.logger.warning(f"Trying to get OMAP state when Rados connection is closed")
+            self.logger.warning("Trying to get OMAP state when Rados connection is closed")
             return omap_dict
-        # The number of items returned is limited by Ceph, so we need to read in a loop until no more items are returned
+        # The number of items returned is limited by Ceph, so we need to read in
+        # a loop until no more items are returned
         while len(omap_list) > 0:
             last_key_read = omap_list[-1][0]
             with rados.ReadOpCtx() as read_op:
@@ -527,14 +597,14 @@ class OmapGatewayState(GatewayState):
             self.version = version_update
             self.logger.debug(f"omap_key generated: {key}")
         except Exception:
-            self.logger.exception(f"Unable to add key to OMAP, exiting!")
+            self.logger.exception("Unable to add key to OMAP, exiting!")
             raise
 
         # Notify other gateways within the group of change
         try:
-            self.ioctx.notify(self.omap_name, timeout_ms = self.notify_timeout)
+            self.ioctx.notify(self.omap_name, timeout_ms=self.notify_timeout)
         except Exception:
-            self.logger.warning(f"Failed to notify.")
+            self.logger.warning("Failed to notify.")
 
     def _remove_key(self, key: str):
         """Removes key from the OMAP."""
@@ -554,14 +624,14 @@ class OmapGatewayState(GatewayState):
             self.version = version_update
             self.logger.debug(f"omap_key removed: {key}")
         except Exception:
-            self.logger.exception(f"Unable to remove key from OMAP, exiting!")
+            self.logger.exception("Unable to remove key from OMAP, exiting!")
             raise
 
         # Notify other gateways within the group of change
         try:
-            self.ioctx.notify(self.omap_name, timeout_ms = self.notify_timeout)
+            self.ioctx.notify(self.omap_name, timeout_ms=self.notify_timeout)
         except Exception:
-            self.logger.warning(f"Failed to notify.")
+            self.logger.warning("Failed to notify.")
 
     def delete_state(self):
         """Deletes OMAP object contents."""
@@ -575,9 +645,9 @@ class OmapGatewayState(GatewayState):
                 self.ioctx.set_omap(write_op, (self.OMAP_VERSION_KEY,),
                                     (str(1),))
                 self.ioctx.operate_write_op(write_op, self.omap_name)
-                self.logger.info(f"Deleted OMAP contents.")
+                self.logger.info("Deleted OMAP contents.")
         except Exception:
-            self.logger.exception(f"Error deleting OMAP contents, exiting!")
+            self.logger.exception("Error deleting OMAP contents, exiting!")
             raise
 
     def register_watch(self, notify_event):
@@ -593,11 +663,11 @@ class OmapGatewayState(GatewayState):
             try:
                 self.watch = self.ioctx.watch(self.omap_name, _watcher_callback)
             except Exception:
-                self.logger.exception(f"Unable to initiate watch")
+                self.logger.exception("Unable to initiate watch")
         else:
-            self.logger.info(f"Watch already exists.")
+            self.logger.info("Watch already exists.")
 
-    def cleanup_omap(self, omap_lock = None):
+    def cleanup_omap(self, omap_lock=None):
         self.logger.info(f"Cleanup OMAP on exit ({self.id_text})")
         if self.watch:
             try:
@@ -621,6 +691,7 @@ class OmapGatewayState(GatewayState):
         if self.conn:
             self.conn.shutdown()
             self.conn = None
+
 
 class GatewayStateHandler:
     """Maintains consistency in NVMeoF target state store instances.
@@ -673,12 +744,12 @@ class GatewayStateHandler:
         self.omap.remove_namespace_qos(subsystem_nqn, nsid)
         self.local.remove_namespace_qos(subsystem_nqn, nsid)
 
-    def add_namespace_host(self, subsystem_nqn: str, nsid: str, host : str, val: str):
+    def add_namespace_host(self, subsystem_nqn: str, nsid: str, host: str, val: str):
         """Adds namespace's host to the state data store."""
         self.omap.add_namespace_host(subsystem_nqn, nsid, host, val)
         self.local.add_namespace_host(subsystem_nqn, nsid, host, val)
 
-    def remove_namespace_host(self, subsystem_nqn: str, nsid: str, host : str):
+    def remove_namespace_host(self, subsystem_nqn: str, nsid: str, host: str):
         """Removes namespace's host from the state data store."""
         self.omap.remove_namespace_host(subsystem_nqn, nsid, host)
         self.local.remove_namespace_host(subsystem_nqn, nsid, host)
@@ -703,7 +774,8 @@ class GatewayStateHandler:
         self.omap.remove_host(subsystem_nqn, host_nqn)
         self.local.remove_host(subsystem_nqn, host_nqn)
 
-    def add_listener(self, subsystem_nqn: str, gateway: str, trtype: str, traddr: str, trsvcid: str, val: str):
+    def add_listener(self, subsystem_nqn: str, gateway: str, trtype: str, traddr: str,
+                     trsvcid: str, val: str):
         """Adds a listener to the state data store."""
         self.omap.add_listener(subsystem_nqn, gateway, trtype, traddr, trsvcid, val)
         self.local.add_listener(subsystem_nqn, gateway, trtype, traddr, trsvcid, val)
@@ -746,23 +818,30 @@ class GatewayStateHandler:
             notify_event.clear()
 
     def namespace_only_lb_group_id_changed(self, old_val, new_val):
-        # If only the lb group id field has changed we can use change_lb_group request instead of re-adding the namespace
+        # If only the lb group id field has changed we can use change_lb_group
+        # request instead of re-adding the namespace
         old_req = None
         new_req = None
         try:
-            old_req = json_format.Parse(old_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+            old_req = json_format.Parse(old_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
             return (False, None)
         try:
-            new_req = json_format.Parse(new_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+            new_req = json_format.Parse(new_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exeption(f"Got exception parsing {new_val}")
             return (False, None)
         if not old_req or not new_req:
-            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, new: {new_val} -> {new_req}")
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> "
+                              f"{old_req}, new: {new_val} -> {new_req}")
             return (False, None)
-        assert old_req != new_req, f"Something was wrong we shouldn't get identical old and new values ({old_req})"
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical " \
+                                   f"old and new values ({old_req})"
         old_req.anagrpid = new_req.anagrpid
         if old_req != new_req:
             # Something besides the group id is different
@@ -770,23 +849,30 @@ class GatewayStateHandler:
         return (True, new_req.anagrpid)
 
     def namespace_only_visibility_changed(self, old_val, new_val):
-        # If only the visibility field has changed we can use change_visibility request instead of re-adding the namespace
+        # If only the visibility field has changed we can use change_visibility
+        # request instead of re-adding the namespace
         old_req = None
         new_req = None
         try:
-            old_req = json_format.Parse(old_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+            old_req = json_format.Parse(old_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
             return (False, None)
         try:
-            new_req = json_format.Parse(new_val, pb2.namespace_add_req(), ignore_unknown_fields=True)
+            new_req = json_format.Parse(new_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exeption(f"Got exception parsing {new_val}")
             return (False, None)
         if not old_req or not new_req:
-            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, new: {new_val} -> {new_req}")
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> "
+                              f"{old_req}, new: {new_val} -> {new_req}")
             return (False, None)
-        assert old_req != new_req, f"Something was wrong we shouldn't get identical old and new values ({old_req})"
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical " \
+                                   f"old and new values ({old_req})"
         old_req.no_auto_visible = new_req.no_auto_visible
         if old_req != new_req:
             # Something besides the group id is different
@@ -794,11 +880,12 @@ class GatewayStateHandler:
         return (True, not new_req.no_auto_visible)
 
     def host_only_key_changed(self, old_val, new_val):
-        # If only the dhchap key has changed we can use change_key request instead of re-adding the host
+        # If only the dhchap key has changed we can use change_key request
+        # instead of re-adding the host
         old_req = None
         new_req = None
         try:
-            old_req = json_format.Parse(old_val, pb2.add_host_req(), ignore_unknown_fields=True )
+            old_req = json_format.Parse(old_val, pb2.add_host_req(), ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
             return (False, None)
@@ -808,10 +895,13 @@ class GatewayStateHandler:
             self.logger.exeption(f"Got exception parsing {new_val}")
             return (False, None)
         if not old_req or not new_req:
-            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, new: {new_val} -> {new_req}")
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> "
+                              f"{old_req}, new: {new_val} -> {new_req}")
             return (False, None)
-        assert old_req != new_req, f"Something was wrong we shouldn't get identical old and new values ({old_req})"
-        # Because of Json formatting of empty fields we might get a difference here, so just use the same values for empty
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical " \
+                                   f"old and new values ({old_req})"
+        # Because of Json formatting of empty fields we might get a difference here,
+        # so just use the same values for empty
         if not old_req.dhchap_key:
             old_req.dhchap_key = ""
         if not new_req.dhchap_key:
@@ -823,24 +913,32 @@ class GatewayStateHandler:
         return (True, new_req.dhchap_key)
 
     def subsystem_only_key_changed(self, old_val, new_val):
-        # If only the dhchap key field has changed we can use change_key request instead of re-adding the subsystem
+        # If only the dhchap key field has changed we can use change_key
+        # request instead of re-adding the subsystem
         old_req = None
         new_req = None
         try:
-            old_req = json_format.Parse(old_val, pb2.create_subsystem_req(), ignore_unknown_fields=True )
+            old_req = json_format.Parse(old_val,
+                                        pb2.create_subsystem_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
             return (False, None)
         try:
-            new_req = json_format.Parse(new_val, pb2.create_subsystem_req(), ignore_unknown_fields=True)
+            new_req = json_format.Parse(new_val,
+                                        pb2.create_subsystem_req(),
+                                        ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exeption(f"Got exception parsing {new_val}")
             return (False, None)
         if not old_req or not new_req:
-            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, new: {new_val} -> {new_req}")
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, "
+                              f"new: {new_val} -> {new_req}")
             return (False, None)
-        assert old_req != new_req, f"Something was wrong we shouldn't get identical old and new values ({old_req})"
-        # Because of Json formatting of empty fields we might get a difference here, so just use the same values for empty
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical old " \
+                                   f"and new values ({old_req})"
+        # Because of Json formatting of empty fields we might get a difference here,
+        # so just use the same values for empty
         if not old_req.dhchap_key:
             old_req.dhchap_key = ""
         if not new_req.dhchap_key:
@@ -855,19 +953,21 @@ class GatewayStateHandler:
         if not ns_key.startswith(GatewayState.NAMESPACE_PREFIX):
             self.logger.warning(f"Invalid namespace key \"{ns_key}\", can't find key parts")
             return (None, None)
-        key_end = ns_key[len(GatewayState.NAMESPACE_PREFIX) : ]
+        key_end = ns_key[len(GatewayState.NAMESPACE_PREFIX):]
         key_parts = key_end.split(GatewayState.OMAP_KEY_DELIMITER)
         if len(key_parts) != 2:
             self.logger.warning(f"Invalid namespace key \"{ns_key}\", can't find key parts")
             return (None, None)
         if not GatewayUtils.is_valid_nqn(key_parts[0]):
-            self.logger.warning(f"Invalid NQN \"{key_parts[0]}\" found for namespace key \"{ns_key}\", can't find key parts")
+            self.logger.warning(f"Invalid NQN \"{key_parts[0]}\" found for namespace "
+                                f"key \"{ns_key}\", can't find key parts")
             return (None, None)
         nqn = key_parts[0]
         try:
             nsid = int(key_parts[1])
         except ValueError:
-            self.logger.exception(f"Invalid NSID \"{key_parts[1]}\" found for namespace key \"{ns_key}\", can't find key parts")
+            self.logger.exception(f"Invalid NSID \"{key_parts[1]}\" found for namespace "
+                                  f"key \"{ns_key}\", can't find key parts")
             return (None, None)
 
         return (nqn, nsid)
@@ -876,17 +976,19 @@ class GatewayStateHandler:
         if not host_key.startswith(GatewayState.HOST_PREFIX):
             self.logger.warning(f"Invalid host key \"{host_key}\", can't find key parts")
             return (None, None)
-        key_end = host_key[len(GatewayState.HOST_PREFIX) : ]
+        key_end = host_key[len(GatewayState.HOST_PREFIX):]
         key_parts = key_end.split(GatewayState.OMAP_KEY_DELIMITER)
         if len(key_parts) != 2:
             self.logger.warning(f"Invalid host key \"{host_key}\", can't find key parts")
             return (None, None)
         if not GatewayUtils.is_valid_nqn(key_parts[0]):
-            self.logger.warning(f"Invalid subsystem NQN \"{key_parts[0]}\" found for host key \"{host_key}\", can't find key parts")
+            self.logger.warning(f"Invalid subsystem NQN \"{key_parts[0]}\" found for host key "
+                                f"\"{host_key}\", can't find key parts")
             return (None, None)
         subsys_nqn = key_parts[0]
         if key_parts[1] != "*" and not GatewayUtils.is_valid_nqn(key_parts[1]):
-            self.logger.warning(f"Invalid host NQN \"{key_parts[0]}\" found for host key \"{host_key}\", can't find key parts")
+            self.logger.warning(f"Invalid host NQN \"{key_parts[0]}\" found for host key "
+                                f"\"{host_key}\", can't find key parts")
             return (None, None)
         host_nqn = key_parts[1]
 
@@ -901,7 +1003,8 @@ class GatewayStateHandler:
             self.logger.warning(f"Invalid subsystem key \"{subsys_key}\", can't find key")
             return None
         if not GatewayUtils.is_valid_nqn(key_parts[1]):
-            self.logger.warning(f"Invalid subsystem NQN \"{key_parts[0]}\" found for subsystem key \"{subsys_key}\", can't find key")
+            self.logger.warning(f"Invalid subsystem NQN \"{key_parts[0]}\" found for subsystem "
+                                f"key \"{subsys_key}\", can't find key")
             return None
         subsys_nqn = key_parts[1]
 
@@ -912,7 +1015,8 @@ class GatewayStateHandler:
         return val_str
 
     def compare_state_values(val1, val2) -> bool:
-        # We sometimes get one value as type bytes and the other as type str, so convert them both to str for the comparison
+        # We sometimes get one value as type bytes and the other as type str,
+        # so convert them both to str for the comparison
         val1_str = GatewayStateHandler.get_str_from_bytes(val1)
         val2_str = GatewayStateHandler.get_str_from_bytes(val2)
         return val1_str == val2_str
@@ -921,11 +1025,11 @@ class GatewayStateHandler:
         """Checks for updated OMAP state and initiates local update."""
 
         if self.update_is_active_lock.locked():
-            self.logger.warning(f"An update is already running, ignore")
+            self.logger.warning("An update is already running, ignore")
             return False
 
         if not self.omap.ioctx:
-            self.logger.warning(f"Can't update when Rados connection is closed")
+            self.logger.warning("Can't update when Rados connection is closed")
             return False
 
         with self.update_is_active_lock:
@@ -944,7 +1048,8 @@ class GatewayStateHandler:
             local_version = self.omap.get_local_version()
 
             if local_version < omap_version:
-                self.logger.debug(f"Start update from {local_version} to {omap_version} ({self.id_text}).")
+                self.logger.debug(f"Start update from {local_version} to "
+                                  f"{omap_version} ({self.id_text}).")
                 local_state_dict = self.local.get_state()
                 local_state_keys = local_state_dict.keys()
                 omap_state_keys = omap_state_dict.keys()
@@ -958,7 +1063,8 @@ class GatewayStateHandler:
                 changed = {
                     key: omap_state_dict[key]
                     for key in same_keys
-                    if not GatewayStateHandler.compare_state_values(local_state_dict[key], omap_state_dict[key])
+                    if not GatewayStateHandler.compare_state_values(local_state_dict[key],
+                                                                    omap_state_dict[key])
                 }
                 grouped_changed = self._group_by_prefix(changed, prefix_list)
 
@@ -972,31 +1078,39 @@ class GatewayStateHandler:
                 subsystem_prefix = GatewayState.build_subsystem_key("nqn")
                 for key in changed.keys():
                     if key.startswith(ns_prefix):
-                        (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(local_state_dict[key],
-                                                                                                  omap_state_dict[key])
+                        (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(
+                            local_state_dict[key],
+                            omap_state_dict[key])
                         if should_process:
                             assert new_lb_grp_id, "Shouldn't get here with an empty lb group id"
-                            self.logger.debug(f"Found {key} where only the load balancing group id has changed. The new group id is {new_lb_grp_id}")
+                            self.logger.debug(f"Found {key} where only the load balancing group id "
+                                              f"has changed. The new group id is {new_lb_grp_id}")
                             only_lb_group_changed.append((key, new_lb_grp_id))
 
                         (should_process,
-                         new_visibility) = self.namespace_only_visibility_changed(local_state_dict[key], omap_state_dict[key])
+                         new_visibility) = self.namespace_only_visibility_changed(
+                             local_state_dict[key], omap_state_dict[key])
                         if should_process:
-                            self.logger.debug(f"Found {key} where only the visibility has changed. The new visibility is {new_visibility}")
+                            self.logger.debug(f"Found {key} where only the visibility has changed. "
+                                              f"The new visibility is {new_visibility}")
                             only_visibility_changed.append((key, new_visibility))
                     elif key.startswith(host_prefix):
                         (should_process,
-                         new_dhchap_key) = self.host_only_key_changed(local_state_dict[key], omap_state_dict[key])
+                         new_dhchap_key) = self.host_only_key_changed(local_state_dict[key],
+                                                                      omap_state_dict[key])
                         if should_process:
                             assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
-                            self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
+                            self.logger.debug(f"Found {key} where only the key has changed. The "
+                                              f"new DHCHAP key is {new_dhchap_key}")
                             only_host_key_changed.append((key, new_dhchap_key))
                     elif key.startswith(subsystem_prefix):
                         (should_process,
-                         new_dhchap_key) = self.subsystem_only_key_changed(local_state_dict[key], omap_state_dict[key])
+                         new_dhchap_key) = self.subsystem_only_key_changed(local_state_dict[key],
+                                                                           omap_state_dict[key])
                         if should_process:
                             assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
-                            self.logger.debug(f"Found {key} where only the key has changed. The new DHCHAP key is {new_dhchap_key}")
+                            self.logger.debug(f"Found {key} where only the key has changed. The "
+                                              f"new DHCHAP key is {new_dhchap_key}")
                             only_subsystem_key_changed.append((key, new_dhchap_key))
 
                 for ns_key, new_lb_grp in only_lb_group_changed:
@@ -1010,13 +1124,18 @@ class GatewayStateHandler:
                     if ns_nqn and ns_nsid:
                         try:
                             lbgroup_key = GatewayState.build_namespace_lbgroup_key(ns_nqn, ns_nsid)
-                            req = pb2.namespace_change_load_balancing_group_req(subsystem_nqn=ns_nqn, nsid=ns_nsid,
-                                                                                anagrpid=new_lb_grp)
-                            json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
-                                                                 including_default_value_fields=True)
+                            req = pb2.namespace_change_load_balancing_group_req(
+                                subsystem_nqn=ns_nqn,
+                                nsid=ns_nsid,
+                                anagrpid=new_lb_grp)
+                            json_req = json_format.MessageToJson(
+                                req,
+                                preserving_proto_field_name=True,
+                                including_default_value_fields=True)
                             added[lbgroup_key] = json_req
                         except Exception:
-                            self.logger.exception(f"Exception formatting change namespace load balancing group request")
+                            self.logger.exception("Exception formatting change namespace "
+                                                  "load balancing group request")
 
                 for ns_key, new_visibility in only_visibility_changed:
                     ns_nqn = None
@@ -1028,14 +1147,21 @@ class GatewayStateHandler:
                         self.logger.exception(f"Exception removing {ns_key} from {changed}")
                     if ns_nqn and ns_nsid:
                         try:
-                            visibility_key = GatewayState.build_namespace_visibility_key(ns_nqn, ns_nsid)
-                            req = pb2.namespace_change_visibility_req(subsystem_nqn=ns_nqn, nsid=ns_nsid,
-                                                                      auto_visible=new_visibility, force=True)
-                            json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
-                                                                 including_default_value_fields=True)
+                            visibility_key = GatewayState.build_namespace_visibility_key(ns_nqn,
+                                                                                         ns_nsid)
+                            req = pb2.namespace_change_visibility_req(
+                                subsystem_nqn=ns_nqn,
+                                nsid=ns_nsid,
+                                auto_visible=new_visibility,
+                                force=True)
+                            json_req = json_format.MessageToJson(
+                                req,
+                                preserving_proto_field_name=True,
+                                including_default_value_fields=True)
                             added[visibility_key] = json_req
                         except Exception:
-                            self.logger.exception(f"Exception formatting change namespace visibility request")
+                            self.logger.exception("Exception formatting change namespace "
+                                                  "visibility request")
 
                 for host_key, new_dhchap_key in only_host_key_changed:
                     subsys_nqn = None
@@ -1046,18 +1172,23 @@ class GatewayStateHandler:
                     except Exception:
                         self.logger.exception(f"Exception removing {host_key} from {changed}")
                     if host_nqn == "*":
-                        self.logger.warning(f"Something went wrong, host \"*\" can't have DH-HMAC-CHAP keys, ignore")
+                        self.logger.warning("Something went wrong, host \"*\" can't have "
+                                            "DH-HMAC-CHAP keys, ignore")
                         continue
                     if subsys_nqn and host_nqn:
                         try:
                             host_key_key = GatewayState.build_host_key_key(subsys_nqn, host_nqn)
-                            req = pb2.change_host_key_req(subsystem_nqn=subsys_nqn, host_nqn=host_nqn,
-                                                                                dhchap_key=new_dhchap_key)
-                            json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
-                                                                 including_default_value_fields=True)
+                            req = pb2.change_host_key_req(subsystem_nqn=subsys_nqn,
+                                                          host_nqn=host_nqn,
+                                                          dhchap_key=new_dhchap_key)
+                            json_req = json_format.MessageToJson(
+                                req,
+                                preserving_proto_field_name=True,
+                                including_default_value_fields=True)
                             added[host_key_key] = json_req
                         except Exception as ex:
-                            self.logger.error(f"Exception formatting change host key request:\n{ex}")
+                            self.logger.error(f"Exception formatting change host "
+                                              f"key request:\n{ex}")
 
                 for subsys_key, new_dhchap_key in only_subsystem_key_changed:
                     subsys_nqn = None
@@ -1069,15 +1200,21 @@ class GatewayStateHandler:
                     if subsys_nqn:
                         try:
                             subsys_key_key = GatewayState.build_subsystem_key_key(subsys_nqn)
-                            req = pb2.change_subsystem_key_req(subsystem_nqn=subsys_nqn, dhchap_key=new_dhchap_key)
-                            json_req = json_format.MessageToJson(req, preserving_proto_field_name=True,
-                                                                 including_default_value_fields=True)
+                            req = pb2.change_subsystem_key_req(subsystem_nqn=subsys_nqn,
+                                                               dhchap_key=new_dhchap_key)
+                            json_req = json_format.MessageToJson(
+                                req,
+                                preserving_proto_field_name=True,
+                                including_default_value_fields=True)
                             added[subsys_key_key] = json_req
                         except Exception as ex:
-                            self.logger.error(f"Exception formatting change subsystem key request:\n{ex}")
+                            self.logger.error(f"Exception formatting change subsystem "
+                                              f"key request:\n{ex}")
 
-                if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0:
+                if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or \
+                   len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0:
                     grouped_changed = self._group_by_prefix(changed, prefix_list)
+
                     if len(only_subsystem_key_changed) > 0:
                         prefix_list += [GatewayState.SUBSYSTEM_KEY_PREFIX]
                     if len(only_lb_group_changed) > 0:
@@ -1105,7 +1242,8 @@ class GatewayStateHandler:
                 # Update local state and version
                 self.local.reset(omap_state_dict)
                 self.omap.set_local_version(omap_version)
-                self.logger.debug(f"Update complete ({local_version} -> {omap_version}) ({self.id_text}).")
+                self.logger.debug(f"Update complete ({local_version} -> "
+                                  f"{omap_version}) ({self.id_text}).")
 
         return True
 
