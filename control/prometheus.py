@@ -14,16 +14,18 @@ import inspect
 import spdk.rpc as rpc
 
 from .proto import gateway_pb2 as pb2
-from prometheus_client.core import REGISTRY, GaugeMetricFamily, CounterMetricFamily, InfoMetricFamily
+from prometheus_client.core import REGISTRY, GaugeMetricFamily
+from prometheus_client.core import CounterMetricFamily, InfoMetricFamily
 from prometheus_client import start_http_server, GC_COLLECTOR
 from typing import NamedTuple
 from functools import wraps
 from .utils import NICS
 
-COLLECTION_ELAPSED_WARNING = 0.8   # Percentage of the refresh interval before a warning message is issued
+COLLECTION_ELAPSED_WARNING = 0.8   # Percentage of the refresh interval before a warning is issued
 REGISTRY.unregister(GC_COLLECTOR)  # Turn off garbage collector metrics
 
 logger = None
+
 
 class RBD(NamedTuple):
     pool: str
@@ -126,7 +128,8 @@ class NVMeOFCollector:
         self.method_timings = {}
 
         if self.bdev_pools:
-            logger.info(f"Stats restricted to bdevs in the following pool(s): {','.join(self.bdev_pools)}")
+            logger.info(f"Stats restricted to bdevs in the following pool(s): "
+                        f"{','.join(self.bdev_pools)}")
         else:
             logger.info("Stats for all bdevs will be provided")
 
@@ -198,7 +201,8 @@ class NVMeOFCollector:
         for subsys in subsystem_list:
             resp = self.gateway_rpc.list_connections(pb2.list_connections_req(subsystem=subsys.nqn))
             if resp.status != 0:
-                logger.error(f"Exporter failed to fetch connection info for {subsys.nqn}: {resp.error_message}")
+                logger.error(f"Exporter failed to fetch connection info for "
+                             f"{subsys.nqn}: {resp.error_message}")
                 continue
             connection_map[subsys.nqn] = resp
         return connection_map
@@ -228,7 +232,8 @@ class NVMeOFCollector:
         if elapsed > self.interval:
             logger.error(f"Stats refresh time > interval time of {self.interval} secs")
         elif elapsed > self.interval * COLLECTION_ELAPSED_WARNING:
-            logger.warning(f"Stats refresh of {elapsed:.2f}s is close to exceeding the interval {self.interval}s")
+            logger.warning(f"Stats refresh of {elapsed:.2f}s is close to exceeding "
+                           f"the interval {self.interval}s")
         else:
             logger.debug(f"Stats refresh completed in {elapsed:.3f} secs.")
 
@@ -313,7 +318,8 @@ class NVMeOFCollector:
         for bdev in self.bdev_io_stats.get("bdevs", []):
             bdev_name = bdev.get('name')
             if bdev_name not in bdev_lookup:
-                logger.debug(f"i/o stats for bdev {bdev_name} skipped. Either not an rbd bdev, or excluded by 'prometheus_bdev_pools'")
+                logger.debug(f"i/o stats for bdev {bdev_name} skipped. Either not an rbd bdev, "
+                             f"or excluded by 'prometheus_bdev_pools'")
                 continue
 
             bdev_read_ops.add_metric([bdev_name], bdev.get("num_read_ops"))
@@ -322,8 +328,10 @@ class NVMeOFCollector:
             bdev_write_bytes.add_metric([bdev_name], bdev.get("bytes_written"))
 
             if tick_rate:
-                bdev_read_seconds.add_metric([bdev_name], (bdev.get("read_latency_ticks") / tick_rate))
-                bdev_write_seconds.add_metric([bdev_name], (bdev.get("write_latency_ticks") / tick_rate))
+                bdev_read_seconds.add_metric([bdev_name],
+                                             (bdev.get("read_latency_ticks") / tick_rate))
+                bdev_write_seconds.add_metric([bdev_name],
+                                              (bdev.get("write_latency_ticks") / tick_rate))
 
         yield bdev_read_ops
         yield bdev_write_ops
@@ -341,15 +349,18 @@ class NVMeOFCollector:
             if "poll" not in spdk_thread["name"]:
                 continue
             if tick_rate:
-                reactor_utilization.add_metric([spdk_thread.get("name"), "busy"], (spdk_thread.get("busy") / tick_rate))
-                reactor_utilization.add_metric([spdk_thread.get("name"), "idle"], (spdk_thread.get("idle") / tick_rate))
+                reactor_utilization.add_metric([spdk_thread.get("name"), "busy"],
+                                               (spdk_thread.get("busy") / tick_rate))
+                reactor_utilization.add_metric([spdk_thread.get("name"), "idle"],
+                                               (spdk_thread.get("idle") / tick_rate))
 
         yield reactor_utilization
 
         subsystem_metadata = GaugeMetricFamily(
             f"{self.metric_prefix}_subsystem_metadata",
             "Metadata describing the subsystem configuration",
-            labels=["nqn", "serial_number", "model_number", "allow_any_host", "ha_enabled", "group"])
+            labels=["nqn", "serial_number", "model_number", "allow_any_host",
+                    "ha_enabled", "group"])
         subsystem_listeners = GaugeMetricFamily(
             f"{self.metric_prefix}_subsystem_listener_count",
             "Number of listener addresses used by the subsystem",
@@ -392,7 +403,8 @@ class NVMeOFCollector:
                 else:
                     listener_map[listener.traddr] = [nqn]
 
-            subsystem_metadata.add_metric([nqn, subsys.serial_number, subsys.model_number, subsys_is_open, ha_enabled, self.gw_metadata.group], 1)
+            subsystem_metadata.add_metric([nqn, subsys.serial_number, subsys.model_number,
+                                           subsys_is_open, ha_enabled, self.gw_metadata.group], 1)
             subsystem_listeners.add_metric([nqn], len(subsys.listen_addresses))
             subsystem_host_count.add_metric([nqn], len(subsys.hosts))
             subsystem_namespace_count.add_metric([nqn], len(subsys.namespaces))
@@ -421,7 +433,7 @@ class NVMeOFCollector:
         yield subsystem_metadata
         yield subsystem_listeners
         yield subsystem_host_count
-        yield subsystem_namespace_count 
+        yield subsystem_namespace_count
         yield subsystem_namespace_limit
         yield subsystem_namespace_metadata
         yield host_connection_state

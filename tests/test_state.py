@@ -107,7 +107,7 @@ def test_state_notify_update(config, ioctx, local_state, omap_state):
     """Confirms use of OMAP watch/notify for updates."""
 
     update_counter = 0
-    notify_event = threading.Event() # Event to signal when notify is called
+    notify_event = threading.Event()      # Event to signal when notify is called
 
     def _state_notify_update(update, is_add_req):
         nonlocal update_counter
@@ -181,8 +181,8 @@ def test_state_notify_update(config, ioctx, local_state, omap_state):
     # to test notify capability
     elapsed = time.time() - start
     wait_interval = update_interval_sec - elapsed - 0.5
-    assert(wait_interval > 0)
-    assert(wait_interval < update_interval_sec)
+    assert wait_interval > 0
+    assert wait_interval < update_interval_sec
     time.sleep(wait_interval)
 
     # expect 4 updates: addition, two-step change and removal

@@ -13,6 +13,7 @@ import time
 import json
 from .utils import GatewayLogger
 
+
 class CephUtils:
     """Miscellaneous functions which connect to Ceph
     """
@@ -27,11 +28,12 @@ class CephUtils:
         self.last_sent = time.time()
 
     def execute_ceph_monitor_command(self, cmd):
-         self.logger.debug(f"Execute monitor command: {cmd}")
-         with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
+        self.logger.debug(f"Execute monitor command: {cmd}")
+        with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
             rply = cluster.mon_command(cmd, b'')
             self.logger.debug(f"Monitor reply: {rply}")
             return rply
+
     def get_gw_id_owner_ana_group(self, pool, group, anagrp):
         str = '{' + f'"prefix":"nvme-gw show", "pool":"{pool}", "group":"{group}"' + '}'
         self.logger.debug(f"nvme-show string: {str}")
@@ -45,23 +47,23 @@ class CephUtils:
         comp_str = f"{anagrp}: ACTIVE"
         for gateway in data["Created Gateways:"]:
             if comp_str in gateway["ana states"]:
-              gw_id = gateway["gw-id"]
-              self.logger.debug(f"found gw owner of anagrp {anagrp}: gw {gw_id}")
-              break
+                gw_id = gateway["gw-id"]
+                self.logger.debug(f"found gw owner of anagrp {anagrp}: gw {gw_id}")
+                break
         return gw_id
 
     def is_rebalance_supported(self):
-        return  self.rebalance_supported
+        return self.rebalance_supported
 
     def get_rebalance_ana_group(self):
-        return  self.rebalance_ana_group
+        return self.rebalance_ana_group
 
     def get_number_created_gateways(self, pool, group):
         now = time.time()
-        if (now - self.last_sent) < 10 and self.anagroup_list :
-             self.logger.info(f"Caching response of the monitor: {self.anagroup_list}")
-             return self.anagroup_list
-        else :
+        if (now - self.last_sent) < 10 and self.anagroup_list:
+            self.logger.info(f"Caching response of the monitor: {self.anagroup_list}")
+            return self.anagroup_list
+        else:
             try:
                 self.anagroup_list = []
                 self.last_sent = now
@@ -76,12 +78,12 @@ class CephUtils:
                     self.rebalance_supported = True
                     self.rebalance_ana_group = data.get("rebalance_ana_group", None)
                     self.logger.debug(f"Rebalance ana_group: {self.rebalance_ana_group}")
-                else :
+                else:
                     self.rebalance_supported = False
                 pos = conv_str.find("[")
                 if pos != -1:
-                    new_str = conv_str[pos + len("[") :]
-                    pos     = new_str.find("]")
+                    new_str = conv_str[pos + len("["):]
+                    pos = new_str.find("]")
                     new_str = new_str[: pos].strip()
                     int_str_list = new_str.split(' ')
                     self.logger.debug(f"new_str : {new_str}")
@@ -92,7 +94,7 @@ class CephUtils:
                     self.logger.warning("GWs not found")
 
             except Exception:
-                self.logger.exception(f"Failure get number created gateways:")
+                self.logger.exception("Failure get number created gateways")
                 self.anagroup_list = []
 
             return self.anagroup_list
@@ -100,11 +102,12 @@ class CephUtils:
     def fetch_and_display_ceph_version(self):
         try:
             rply = self.execute_ceph_monitor_command('{"prefix":"mon versions"}')
-            ceph_ver = rply[1].decode().removeprefix("{").strip().split(":")[0].removeprefix('"').removesuffix('"')
+            ceph_ver = rply[1].decode().removeprefix("{").strip().split(":")[0]
+            ceph_ver = ceph_ver.removeprefix('"').removesuffix('"')
             ceph_ver = ceph_ver.removeprefix("ceph version ")
             self.logger.info(f"Connected to Ceph with version \"{ceph_ver}\"")
         except Exception:
-            self.logger.exception(f"Failure fetching Ceph version:")
+            self.logger.exception("Failure fetching Ceph version")
             pass
 
     def fetch_ceph_fsid(self) -> str:
@@ -113,7 +116,7 @@ class CephUtils:
             with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
                 fsid = cluster.get_fsid()
         except Exception:
-            self.logger.exception(f"Failure fetching Ceph fsid:")
+            self.logger.exception("Failure fetching Ceph fsid")
 
         return fsid
 
@@ -130,37 +133,40 @@ class CephUtils:
 
     def service_daemon_register(self, cluster, metadata):
         try:
-            if cluster: # rados client 
+            if cluster:              # rados client
                 daemon_name = metadata['id']
                 cluster.service_daemon_register("nvmeof", daemon_name, metadata)
                 self.logger.info(f"Registered {daemon_name} to service_map!")
         except Exception:
-            self.logger.exception(f"Can't register daemon to service_map!")
+            self.logger.exception("Can't register daemon to service_map!")
 
     def service_daemon_update(self, cluster, status_buffer):
         try:
             if cluster and status_buffer:
                 cluster.service_daemon_update(status_buffer)
         except Exception:
-            self.logger.exception(f"Can't update daemon status to service_map!") 
+            self.logger.exception("Can't update daemon status to service_map!")
 
     def create_image(self, pool_name, image_name, size) -> bool:
         # Check for pool existence in advance as we don't create it if it's not there
         if not self.pool_exists(pool_name):
-            raise rbd.ImageNotFound(f"Pool {pool_name} doesn't exist", errno = errno.ENODEV)
+            raise rbd.ImageNotFound(f"Pool {pool_name} doesn't exist", errno=errno.ENODEV)
 
         image_exists = False
         try:
             image_size = self.get_image_size(pool_name, image_name)
             image_exists = True
         except rbd.ImageNotFound:
-            self.logger.debug(f"Image {pool_name}/{image_name} doesn't exist, will create it using size {size}")
+            self.logger.debug(f"Image {pool_name}/{image_name} doesn't exist, will "
+                              f"create it using size {size}")
             pass
 
         if image_exists:
             if image_size != size:
-                raise rbd.ImageExists(f"Image {pool_name}/{image_name} already exists with a size of {image_size} bytes which differs from the requested size of {size} bytes",
-                                      errno = errno.EEXIST)
+                raise rbd.ImageExists(f"Image {pool_name}/{image_name} already exists with "
+                                      f"a size of {image_size} bytes which differs from the "
+                                      f"requested size of {size} bytes",
+                                      errno=errno.EEXIST)
             return False    # Image exists with an idetical size, there is nothing to do here
 
         with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
@@ -168,31 +174,34 @@ class CephUtils:
                 rbd_inst = rbd.RBD()
                 try:
                     rbd_inst.create(ioctx, image_name, size)
-                except rbd.ImageExists as ex:
+                except rbd.ImageExists:
                     self.logger.exception(f"Image {pool_name}/{image_name} was created just now")
-                    raise rbd.ImageExists(f"Image {pool_name}/{image_name} was just created by someone else, please retry",
-                                          errno = errno.EAGAIN)
-                except Exception as ex:
+                    raise rbd.ImageExists(f"Image {pool_name}/{image_name} was just created by "
+                                          f"someone else, please retry",
+                                          errno=errno.EAGAIN)
+                except Exception:
                     self.logger.exception(f"Can't create image {pool_name}/{image_name}")
-                    raise ex
+                    raise
 
         return True
 
     def get_image_size(self, pool_name, image_name) -> int:
         image_size = 0
         if not self.pool_exists(pool_name):
-            raise rbd.ImageNotFound(f"Pool {pool_name} doesn't exist", errno = errno.ENODEV)
+            raise rbd.ImageNotFound(f"Pool {pool_name} doesn't exist", errno=errno.ENODEV)
 
         with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
             with cluster.open_ioctx(pool_name) as ioctx:
-                rbd_inst = rbd.RBD()
+                rbd.RBD()
                 try:
                     with rbd.Image(ioctx, image_name) as img:
                         image_size = img.size()
                 except rbd.ImageNotFound:
-                    raise rbd.ImageNotFound(f"Image {pool_name}/{image_name} doesn't exist", errno = errno.ENODEV)
+                    raise rbd.ImageNotFound(f"Image {pool_name}/{image_name} doesn't exist",
+                                            errno=errno.ENODEV)
                 except Exception as ex:
-                    self.logger.exception(f"Error while trying to get the size of image {pool_name}/{image_name}")
+                    self.logger.exception(f"Error while trying to get the size of image "
+                                          f"{pool_name}/{image_name}")
                     raise ex
 
         return image_size
@@ -205,6 +214,6 @@ class CephUtils:
             if msg.startswith("["):
                 pos = msg.find("]")
                 if pos >= 0:
-                    msg = msg[pos + 1 :].strip()
+                    msg = msg[pos + 1:].strip()
             ex_details = (ex.errno, msg)
         return ex_details

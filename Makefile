@@ -30,6 +30,10 @@ include mk/autohelp.mk
 .DEFAULT_GOAL := all
 all: setup $(ALL)
 
+verify: ## Run Python source files through flake8
+	@echo Verifying Python source files
+	flake8 control/*.py tests/*.py
+
 setup: ## Configure huge-pages (requires sudo/root password)
 
 	@echo Setup core dump pattern as /tmp/coredump/core.*

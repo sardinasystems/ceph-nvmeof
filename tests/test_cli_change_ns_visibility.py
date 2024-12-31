@@ -12,6 +12,7 @@ pool = "rbd"
 subsystem = "nqn.2016-06.io.spdk:cnode1"
 config = "ceph-nvmeof.conf"
 
+
 @pytest.fixture(scope="module")
 def two_gateways(config):
     """Sets up and tears down two Gateways"""
@@ -40,8 +41,12 @@ def two_gateways(config):
 
     ceph_utils = CephUtils(config)
     with (GatewayServer(configA) as gatewayA, GatewayServer(configB) as gatewayB):
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{nameA}", "pool": "{pool}", "group": ""' + "}")
-        ceph_utils.execute_ceph_monitor_command("{" + f'"prefix":"nvme-gw create", "id": "{nameB}", "pool": "{pool}", "group": ""' + "}")
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{nameA}", "pool": "{pool}", "group": ""' + "}"
+        )
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{nameB}", "pool": "{pool}", "group": ""' + "}"
+        )
         gatewayA.serve()
         gatewayB.serve()
 
@@ -63,33 +68,43 @@ def test_change_namespace_visibility(caplog, two_gateways):
     cli(["subsystem", "add", "--subsystem", subsystem, "--no-group-append"])
     assert f"create_subsystem {subsystem}: True" in caplog.text
     caplog.clear()
-    cli(["namespace", "add", "--subsystem", subsystem, "--rbd-pool", pool, "--rbd-image", f"{image}", "--size", "16MB", "--rbd-create-image"])
+    cli(["namespace", "add", "--subsystem", subsystem, "--rbd-pool", pool,
+         "--rbd-image", f"{image}", "--size", "16MB", "--rbd-create-image"])
     assert f"Adding namespace 1 to {subsystem}: Successful" in caplog.text
     caplog.clear()
     cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "1"])
-    assert f'"nsid": 1' in caplog.text
-    assert f'"auto_visible": true' in caplog.text
+    assert '"nsid": 1' in caplog.text
+    assert '"auto_visible": true' in caplog.text
     caplog.clear()
-    cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "1", "--no-auto-visible"])
-    assert f'Changing visibility of namespace 1 in {subsystem} to "visible to selected hosts": Successful' in caplog.text
-    assert f'Received request to change the visibility of namespace 1 in {subsystem} to "visible to selected hosts", force: False, context: <grpc._server' in caplog.text
+    cli(["namespace", "change_visibility", "--subsystem", subsystem,
+         "--nsid", "1", "--no-auto-visible"])
+    assert f'Changing visibility of namespace 1 in {subsystem} to "visible to selected hosts": ' \
+           f'Successful' in caplog.text
+    assert f'Received request to change the visibility of namespace 1 in {subsystem} ' \
+           f'to "visible to selected hosts", force: False, context: <grpc._server' in caplog.text
     time.sleep(15)
-    assert f'Received request to change the visibility of namespace 1 in {subsystem} to "visible to selected hosts", force: True, context: None' in caplog.text
+    assert f'Received request to change the visibility of namespace 1 in {subsystem} ' \
+           f'to "visible to selected hosts", force: True, context: None' in caplog.text
     assert f"Received request to remove namespace 1 from {subsystem}" not in caplog.text
     assert f"Received request to add namespace 1 to {subsystem}" not in caplog.text
     caplog.clear()
     cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "1"])
-    assert f'"nsid": 1' in caplog.text
-    assert '"auto_visible":' not in caplog.text or f'"auto_visible": false' in caplog.text
+    assert '"nsid": 1' in caplog.text
+    assert '"auto_visible":' not in caplog.text or '"auto_visible": false' in caplog.text
     caplog.clear()
-    cli(["--server-port", "5502", "namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "1", "--auto-visible"])
-    assert f'Changing visibility of namespace 1 in {subsystem} to "visible to all hosts": Successful' in caplog.text
-    assert f'Received request to change the visibility of namespace 1 in {subsystem} to "visible to all hosts", force: False, context: <grpc._server' in caplog.text
+    cli(["--server-port", "5502", "namespace", "change_visibility",
+         "--subsystem", subsystem, "--nsid", "1", "--auto-visible"])
+    assert f'Changing visibility of namespace 1 in {subsystem} to "visible to all hosts": ' \
+           f'Successful' in caplog.text
+    assert f'Received request to change the visibility of namespace 1 in {subsystem} to ' \
+           f'"visible to all hosts", force: False, context: <grpc._server' in caplog.text
     time.sleep(15)
-    assert f'Received request to change the visibility of namespace 1 in {subsystem} to "visible to all hosts", force: True, context: None' in caplog.text
+    assert f'Received request to change the visibility of namespace 1 in {subsystem} to ' \
+           f'"visible to all hosts", force: True, context: None' in caplog.text
     assert f"Received request to remove namespace 1 from {subsystem}" not in caplog.text
     assert f"Received request to add namespace 1 to {subsystem}" not in caplog.text
     caplog.clear()
-    cli(["--server-port", "5502", "--format", "json", "namespace", "list", "--subsystem", subsystem, "--nsid", "1"])
-    assert f'"nsid": 1' in caplog.text
-    assert f'"auto_visible": true' in caplog.text
+    cli(["--server-port", "5502", "--format", "json", "namespace", "list",
+         "--subsystem", subsystem, "--nsid", "1"])
+    assert '"nsid": 1' in caplog.text
+    assert '"auto_visible": true' in caplog.text
