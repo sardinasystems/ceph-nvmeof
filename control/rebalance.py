@@ -31,6 +31,8 @@ class Rebalance:
             "max_ns_to_change_lb_grp",
             8)
         self.rebalance_event = threading.Event()
+        self.logger.info(f" Starting rebalance thread: period: {self.rebalance_period_sec},"
+                         f" max number ns to move: {self.rebalance_max_ns_to_change_lb_grp}")
         self.auto_rebalance = threading.Thread(target=self.auto_rebalance_task,
                                                daemon=True, args=(self.rebalance_event,))
         self.auto_rebalance.start()           # start the thread
