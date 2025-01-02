@@ -706,6 +706,8 @@ class GatewayClient:
             self.cli.parser.error("--max-namespaces value must be positive")
         if args.subsystem == GatewayUtils.DISCOVERY_NQN:
             self.cli.parser.error("Can't add a discovery subsystem")
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
 
         req = pb2.create_subsystem_req(subsystem_nqn=args.subsystem,
                                        serial_number=args.serial_number,
@@ -877,6 +879,9 @@ class GatewayClient:
         """Change subsystem's inband authentication key."""
 
         out_func, err_func = self.get_output_functions(args)
+
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
 
         req = pb2.change_subsystem_key_req(subsystem_nqn=args.subsystem, dhchap_key=args.dhchap_key)
         try:
@@ -1246,6 +1251,12 @@ class GatewayClient:
         ret_list = []
         out_func, err_func = self.get_output_functions(args)
 
+        if args.psk == "":
+            self.cli.parser.error("PSK key can't be empty")
+
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
+
         if args.psk:
             if len(args.host_nqn) > 1:
                 self.cli.parser.error("Can't have more than one host NQN when PSK keys are used")
@@ -1356,6 +1367,9 @@ class GatewayClient:
         """Change host's inband authentication keys."""
 
         out_func, err_func = self.get_output_functions(args)
+
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
 
         if args.host_nqn == "*":
             self.cli.parser.error("Can't change keys for host NQN '*', please use a real NQN")
