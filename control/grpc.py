@@ -22,6 +22,9 @@ from typing import Iterator, Callable
 from collections import defaultdict
 import logging
 import shutil
+from base64 import b64decode
+from binascii import Error
+from binascii import crc32
 
 import spdk.rpc.bdev as rpc_bdev
 import spdk.rpc.nvmf as rpc_nvmf
@@ -67,6 +70,7 @@ class MonitorGroupService(monitor_pb2_grpc.MonitorGroupServicer):
 
 class SubsystemHostAuth:
     MAX_PSK_KEY_NAME_LENGTH = 200     # taken from SPDK SPDK_TLS_PSK_MAX_LEN
+    MAX_DHCHAP_KEY_NAME_LENGTH = 256
 
     def __init__(self):
         self.subsys_allow_any_hosts = defaultdict(dict)
@@ -74,6 +78,159 @@ class SubsystemHostAuth:
         self.host_dhchap_key = defaultdict(dict)
         self.host_psk_key = defaultdict(dict)
         self.host_nqn = defaultdict(set)
+
+    def is_valid_psk(self, psk: str):
+        PSK_CRC32_SIZE_BYTES = 4
+        PSK_DELIM = ":"
+        PSK_PREFIX = "NVMeTLSkey-1"
+        PSK_HASH_ALGORITHMS = [0, 1, 2]
+        PSK_HASH_LENGTHS = [-1, 32, 48]
+
+        failure_prefix = "Invalid PSK key"
+        if not psk:
+            return (errno.ENOKEY, f"{failure_prefix}: key can't be empty")
+
+        failure_prefix += f" \"{psk}\""
+        if not isinstance(psk, str):
+            return (errno.EINVAL, f"{failure_prefix}: key must be a string")
+
+        if not psk.startswith(PSK_PREFIX + PSK_DELIM):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: key must start with \"{PSK_PREFIX}{PSK_DELIM}\"")
+
+        if len(psk) >= SubsystemHostAuth.MAX_PSK_KEY_NAME_LENGTH:
+            return (errno.E2BIG,
+                    f"{failure_prefix}: key is too long, must be shorter than "
+                    f"{SubsystemHostAuth.MAX_PSK_KEY_NAME_LENGTH} characters")
+
+        if not psk.endswith(PSK_DELIM):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: key must end with \"{PSK_DELIM}\"")
+
+        psk_parts = psk.removeprefix(PSK_PREFIX + PSK_DELIM).removesuffix(PSK_DELIM).split(":", 1)
+        if len(psk_parts) != 2:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: should contain a \"{PSK_DELIM}\" delimiter")
+
+        if not len(psk_parts[0]):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: missing hash")
+
+        try:
+            key_hash = int(psk_parts[0])
+        except ValueError:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: non numeric hash \"{psk_parts[0]}\"")
+
+        if key_hash not in PSK_HASH_ALGORITHMS:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: invalid key length")
+
+        if not len(psk_parts[1]):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is missing")
+
+        try:
+            decoded = b64decode(psk_parts[1], validate=True)
+        except Error:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is invalid")
+
+        if not decoded:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is missing")
+
+        if PSK_HASH_LENGTHS[key_hash] >= 0:
+            if len(decoded) != PSK_HASH_LENGTHS[key_hash] + PSK_CRC32_SIZE_BYTES:
+                return (errno.EINVAL,
+                        f"{failure_prefix}: invalid key length")
+
+        crc32_part = decoded[-PSK_CRC32_SIZE_BYTES:]
+        key_part = decoded[:-PSK_CRC32_SIZE_BYTES]
+        computed_crc32 = crc32(key_part)
+        crc32_intval = int.from_bytes(crc32_part, byteorder='little', signed=False)
+        if computed_crc32 != crc32_intval:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: CRC-32 checksums mismatch")
+
+        return (0, os.strerror(0))
+
+    def is_valid_dhchap_key(self, dhchap_key):
+        DHCHAP_CRC32_SIZE_BYTES = 4
+        DHCHAP_DELIM = ":"
+        DHCHAP_PREFIX = "DHHC-1"
+        DHCHAP_HASH_ALGORITHMS = [0, 1, 2, 3]
+        DHCHAP_HASH_LENGTHS = [-1, 32, 48, 64]
+
+        failure_prefix = "Invalid DH-HMAC-CHAP key"
+        if not dhchap_key:
+            return (errno.ENOKEY, f"{failure_prefix}: key can't be empty")
+
+        failure_prefix += f" \"{dhchap_key}\""
+        if not isinstance(dhchap_key, str):
+            return (errno.EINVAL, "{failure_prefix}: key must be a string")
+
+        if not dhchap_key.startswith(DHCHAP_PREFIX + DHCHAP_DELIM):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: key must start with \"{DHCHAP_PREFIX}{DHCHAP_DELIM}\"")
+
+        if len(dhchap_key) >= SubsystemHostAuth.MAX_DHCHAP_KEY_NAME_LENGTH:
+            return (errno.E2BIG,
+                    f"{failure_prefix}: key is too long, must be shorter than "
+                    f"{SubsystemHostAuth.MAX_DHCHAP_KEY_NAME_LENGTH} characters")
+
+        if not dhchap_key.endswith(DHCHAP_DELIM):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: key must end with \"{DHCHAP_DELIM}\"")
+
+        dhchap_parts = dhchap_key.removeprefix(
+            DHCHAP_PREFIX + DHCHAP_DELIM).removesuffix(DHCHAP_DELIM).split(":", 1)
+        if len(dhchap_parts) != 2:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: should contain a \"{DHCHAP_DELIM}\" delimiter")
+
+        if not len(dhchap_parts[0]):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: missing hash")
+
+        try:
+            key_hash = int(dhchap_parts[0])
+        except ValueError:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: non numeric hash \"{dhchap_parts[0]}\"")
+
+        if key_hash not in DHCHAP_HASH_ALGORITHMS:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: invalid key length")
+
+        if not len(dhchap_parts[1]):
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is missing")
+
+        try:
+            decoded = b64decode(dhchap_parts[1], validate=True)
+        except Error:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is invalid")
+
+        if not decoded:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: base64 part is missing")
+
+        if DHCHAP_HASH_LENGTHS[key_hash] >= 0:
+            if len(decoded) != DHCHAP_HASH_LENGTHS[key_hash] + DHCHAP_CRC32_SIZE_BYTES:
+                return (errno.EINVAL,
+                        f"{failure_prefix}: invalid key length")
+
+        crc32_part = decoded[-DHCHAP_CRC32_SIZE_BYTES:]
+        key_part = decoded[:-DHCHAP_CRC32_SIZE_BYTES]
+        computed_crc32 = crc32(key_part)
+        crc32_intval = int.from_bytes(crc32_part, byteorder='little', signed=False)
+        if computed_crc32 != crc32_intval:
+            return (errno.EINVAL,
+                    f"{failure_prefix}: CRC-32 checksums mismatch")
+
+        return (0, os.strerror(0))
 
     def clean_subsystem(self, subsys):
         self.host_psk_key.pop(subsys, None)
@@ -376,6 +533,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         else:
             self.host_name = socket.gethostname()
         self.verify_nqns = self.config.getboolean_with_default("gateway", "verify_nqns", True)
+        self.verify_keys = self.config.getboolean_with_default("gateway", "verify_keys", True)
         self.gateway_group = self.config.get_with_default("gateway", "group", "")
         self.max_hosts_per_namespace = self.config.getint_with_default(
             "gateway",
@@ -1052,6 +1210,16 @@ class GatewayService(pb2_grpc.GatewayServicer):
             return pb2.subsys_status(status=errno.E2BIG,
                                      error_message=errmsg,
                                      nqn=request.subsystem_nqn)
+
+        if self.verify_keys:
+            if request.dhchap_key:
+                rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
+                if rc[0] != 0:
+                    errmsg = f"{create_subsystem_error_prefix}: {rc[1]}"
+                    self.logger.error(errmsg)
+                    return pb2.subsys_status(status=rc[0],
+                                             error_message=errmsg,
+                                             nqn=request.subsystem_nqn)
 
         if context:
             if request.no_group_append or not self.gateway_group:
@@ -2946,6 +3114,21 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
+        if self.verify_keys:
+            if request.psk:
+                rc = self.host_info.is_valid_psk(request.psk)
+                if rc[0] != 0:
+                    errmsg = f"{host_failure_prefix}: {rc[1]}"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=rc[0], error_message=errmsg)
+
+            if request.dhchap_key:
+                rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
+                if rc[0] != 0:
+                    errmsg = f"{host_failure_prefix}: {rc[1]}"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=rc[0], error_message=errmsg)
+
         if request.dhchap_key:
             if not self.host_info.does_subsystem_have_dhchap_key(request.subsystem_nqn):
                 self.logger.warning(f"Host {request.host_nqn} has a DH-HMAC-CHAP key but subsystem "
@@ -3247,6 +3430,14 @@ class GatewayService(pb2_grpc.GatewayServicer):
             errmsg = f"{failure_prefix}: Host NQN can't be '*'"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+        if self.verify_keys:
+            if request.dhchap_key:
+                rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
+                if rc[0] != 0:
+                    errmsg = f"{failure_prefix}: {rc[1]}"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=rc[0], error_message=errmsg)
 
         if not GatewayState.is_key_element_valid(request.host_nqn):
             errmsg = f"{failure_prefix}: Invalid host NQN \"{request.host_nqn}\", " \
@@ -4106,6 +4297,14 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 errmsg = f"{failure_prefix}: {rc[1]}"
                 self.logger.error(errmsg)
                 return pb2.req_status(status=rc[0], error_message=errmsg)
+
+        if self.verify_keys:
+            if request.dhchap_key:
+                rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
+                if rc[0] != 0:
+                    errmsg = f"{failure_prefix}: {rc[1]}"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=rc[0], error_message=errmsg)
 
         if GatewayUtils.is_discovery_nqn(request.subsystem_nqn):
             errmsg = f"{failure_prefix}: Can't change DH-HMAC-CHAP key for a discovery subsystem"

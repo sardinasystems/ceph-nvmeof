@@ -21,12 +21,29 @@ hostnqn9 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f3
 hostnqn10 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f4"
 hostnqn11 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f5"
 hostnqn12 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f6"
+hostnqn13 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f7"
 
 hostpsk1 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
 hostpsk2 = \
     "NVMeTLSkey-1:02:FTFds4vH4utVcfrOforxbrWIgv+Qq4GQHgMdWwzDdDxE1bAqK2mOoyXxmbJxGeueEVVa/Q==:"
-hostpsk3 = "junk"
-hostpsk4 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+hostpsk3 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+hostpsk4 = \
+    "NVMeTLSkey-1:02:AP/STOH7Z/V9wGU2Pmh01rhBpaQfxY+WIlGxCUd9UWVagpDMDaSoujOP/nFfgzgOnTgu1g==:"
+
+badhostpsk0 = "junk"
+badhostpsk1 = "xVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk2 = "NVMeTLSkey-1:01YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk3 = "NVMeTLSkey-1:07:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk4 = "NVMeTLSkey-1::YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk5 = "NVMeTLSkey-1:tt:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk6 = "NVMeTLSkey-1:01::"
+badhostpsk7 = "NVMeTLSkey-1:01:xxxx:"
+badhostpsk8 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT"
+badhostpsk9 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuTYzrP:"
+badhostpsk10 = "NVMeTLSkey-1:02:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
+badhostpsk11 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBu*:"
+badhostpsk12 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT::"
+badhostpsk13 = "NVMeTLSkey-1:01:YztPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
 
 hostdhchap1 = "DHHC-1:00:MWPqcx1Ug1debg8fPIGpkqbQhLcYUt39k7UWirkblaKEH1kE:"
 
@@ -100,8 +117,10 @@ def test_create_secure(caplog, gateway):
     cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn2, "--psk", hostpsk2])
     assert f"Adding host {hostnqn2} to {subsystem}: Successful" in caplog.text
     caplog.clear()
-    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn4, "--psk", hostpsk4])
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn4, "--psk", hostpsk3])
     assert f"Adding host {hostnqn4} to {subsystem}: Successful" in caplog.text
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn13, "--psk", hostpsk4])
+    assert f"Adding host {hostnqn13} to {subsystem}: Successful" in caplog.text
 
 
 def test_create_not_secure(caplog, gateway):
@@ -130,10 +149,63 @@ def test_create_secure_list(caplog, gateway):
     assert "error: Can't have more than one host NQN when PSK keys are used" in caplog.text
 
 
-def test_create_secure_junk_key(caplog, gateway):
+def test_create_secure_bad_key(caplog, gateway):
     caplog.clear()
-    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", hostpsk3])
-    assert f"Failure adding host {hostnqn3} to {subsystem}" in caplog.text
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk0])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk0}": key must start with "NVMeTLSkey-1:' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk1])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk1}": key must start with "NVMeTLSkey-1:' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk2])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk2}": should contain a ":" delimiter' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk3])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk3}": invalid key length' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk4])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk4}": missing hash' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk5])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk5}": non numeric hash "' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk6])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk6}": base64 part is missing' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk7])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk7}": invalid key length' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk8])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk8}": key must end with ":"' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk9])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk9}": invalid key length' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk10])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk10}": invalid key length' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk11])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk11}": base64 part is invalid' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk12])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk12}": base64 part is invalid' in caplog.text
+    caplog.clear()
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn3, "--psk", badhostpsk13])
+    assert f'Failure adding host {hostnqn3} to {subsystem}: Invalid PSK key ' \
+           f'"{badhostpsk13}": CRC-32 checksums mismatch' in caplog.text
 
 
 def test_create_secure_no_key(caplog, gateway):
@@ -148,11 +220,23 @@ def test_create_secure_no_key(caplog, gateway):
     assert "error: argument --psk/-p: expected one argument" in caplog.text
 
 
+def test_create_secure_empty_key(caplog, gateway):
+    caplog.clear()
+    rc = 0
+    try:
+        cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn5, "--psk", ""])
+    except SystemExit as sysex:
+        rc = int(str(sysex))
+        pass
+    assert rc == 2
+    assert "error: PSK key can't be empty" in caplog.text
+
+
 def test_list_psk_hosts(caplog, gateway):
     caplog.clear()
     hosts = cli_test(["host", "list", "--subsystem", subsystem])
     found = 0
-    assert len(hosts.hosts) == 5
+    assert len(hosts.hosts) == 6
     for h in hosts.hosts:
         if h.nqn == hostnqn1:
             found += 1
@@ -169,9 +253,12 @@ def test_list_psk_hosts(caplog, gateway):
         elif h.nqn == hostnqn7:
             found += 1
             assert not h.use_psk
+        elif h.nqn == hostnqn13:
+            found += 1
+            assert h.use_psk
         else:
             assert False
-    assert found == 5
+    assert found == 6
 
 
 def test_allow_any_host_with_psk(caplog, gateway):
