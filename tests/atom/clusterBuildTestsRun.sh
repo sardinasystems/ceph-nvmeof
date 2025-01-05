@@ -46,7 +46,7 @@ cd ceph-nvmeof-atom
 git checkout $ATOM_SHA
 
 # Build atom images based on the cloned repo
-docker build -t nvmeof_atom:$ATOM_SHA .
+sudo docker build -t nvmeof_atom:$ATOM_SHA .
 
 set -x
 if [ "$5" != "nightly" ]; then
@@ -69,6 +69,7 @@ if [ "$5" != "nightly" ]; then
         --failover-num=2 \
         --failover-num-after-upgrade=2 \
         --rbd-size=200M \
+        --seed=0 \
         --fio-devices-num=1 \
         --lb-timeout=20 \
         --config-dbg-mon=10 \
@@ -80,9 +81,11 @@ if [ "$5" != "nightly" ]; then
         --nvmeof-daemon-remove \
         --redeploy-gws \
         --github-action-deployment \
-        --skip-ns-rebalancing-test \
+        --dont-use-mtls \
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
+        --ibm-cloud-key=nokey \
+        --github-nvmeof-token=nokey \
         --env=m6
 else
     sudo docker run \
@@ -101,9 +104,10 @@ else
         --subsystem-num=118 \
         --ns-num=8 \
         --subsystem-max-ns-num=1024 \
-        --failover-num=6 \
+        --failover-num=10 \
         --failover-num-after-upgrade=2 \
         --rbd-size=200M \
+        --seed=0 \
         --fio-devices-num=1 \
         --lb-timeout=20 \
         --config-dbg-mon=10 \
@@ -116,10 +120,11 @@ else
         --redeploy-gws \
         --github-action-deployment \
         --dont-use-mtls \
-        --skip-ns-rebalancing-test \
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
         --dont-use-hugepages \
+        --ibm-cloud-key=nokey \
+        --github-nvmeof-token=nokey \
         --env=m6
 fi
 set +x
