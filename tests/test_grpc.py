@@ -60,7 +60,7 @@ def test_create_get_subsys(caplog, config):
             assert "failed" not in caplog.text.lower().replace("failed to notify", "")
             assert "Failure" not in caplog.text
 
-        assert f"{subsystem_prefix}0 with ANA group id 1" in caplog.text
+        assert f"{subsystem_prefix}0 with load balancing group id 1" in caplog.text
 
         caplog.clear()
         # add a listener
@@ -109,7 +109,7 @@ def test_create_get_subsys(caplog, config):
             time.sleep(0.1)
 
         time.sleep(20)     # Make sure update() is over
-        assert f"{subsystem_prefix}0 with ANA group id 1" in caplog.text
+        assert f"{subsystem_prefix}0 with load balancing group id 1" in caplog.text
         assert f"Received request to set QOS limits for namespace 1 on " \
                f"{subsystem_prefix}0, R/W IOs per second: 2000 " \
                f"Read megabytes per second: 5" in caplog.text

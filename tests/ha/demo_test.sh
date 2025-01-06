@@ -251,6 +251,89 @@ function demo_bdevperf_unsecured()
     [[ "$devs" == "Nvme0n1 Nvme0n2" ]]
     make exec SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_detach_controller Nvme0"
 
+    echo "ℹ️  verify listeners info, both gateway and SPDK"
+    rm -f /tmp/gw_listeners.txt
+    rm -f /tmp/listeners2.txt
+    cephnvmf_func --output stdio --format json gw listener_info --subsystem $NQN > /tmp/gw_listeners.txt
+    cephnvmf_func --output stdio --format json listener list --subsystem $NQN > /tmp/listeners.txt
+    cat /tmp/gw_listeners.txt
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.status'` == "0" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.trtype'` == "TCP" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.adrfam'` == "ipv6" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.traddr'` == "2001:db8::3" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.trsvcid'` == "4420" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.secure'` == "false" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.trtype'` == "TCP" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.adrfam'` == "ipv4" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.traddr'` == "0.0.0.0" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.trsvcid'` == "4430" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.secure'` == "false" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.trtype'` == "TCP" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.adrfam'` == "ipv4" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.traddr'` == "192.168.13.3" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.trsvcid'` == "4420" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.secure'` == "false" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[3]'` == "null" ]]
+    hostname0=`cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].listener.host_name'`
+    hostname1=`cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[1].listener.host_name'`
+    hostname2=`cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[2].listener.host_name'`
+    [[ "$hostname0" == "$hostname1" ]]
+    [[ "$hostname0" == "$hostname2" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].lb_states[0].grp_id'` == "1" ]]
+    [[ `cat /tmp/gw_listeners.txt | jq -r '.gw_listeners[0].lb_states[0].state'` == "OPTIMIZED" ]]
+    for lsnr in 0 1 2
+    do
+        [[ `cat /tmp/gw_listeners.txt | jq -r ".gw_listeners[${lsnr}].lb_states[0].grp_id"` == "1" ]]
+        [[ `cat /tmp/gw_listeners.txt | jq -r ".gw_listeners[${lsnr}].lb_states[0].state"` == "OPTIMIZED" ]]
+        for i in `seq 1 15`
+        do
+            grp=`expr ${i} + 1`
+            [[ `cat /tmp/gw_listeners.txt | jq -r ".gw_listeners[${lsnr}].lb_states[${i}].grp_id"` == "${grp}" ]]
+            [[ `cat /tmp/gw_listeners.txt | jq -r ".gw_listeners[${lsnr}].lb_states[${i}].state"` == "INACCESSIBLE" ]]
+        done
+    done
+
+    cat /tmp/listeners.txt
+    [[ `cat /tmp/listeners.txt | jq -r '.status'` == "0" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[0].trtype'` == "TCP" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[0].adrfam'` == "ipv4" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[0].traddr'` == "192.168.13.3" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[0].trsvcid'` == "4420" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[0].secure'` == "false" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[1].trtype'` == "TCP" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[1].adrfam'` == "ipv4" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[1].traddr'` == "0.0.0.0" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[1].trsvcid'` == "4430" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[1].secure'` == "false" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[2].trtype'` == "TCP" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[2].adrfam'` == "ipv6" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[2].traddr'` == "[2001:db8::3]" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[2].trsvcid'` == "4420" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[2].secure'` == "false" ]]
+    [[ `cat /tmp/listeners.txt | jq -r '.listeners[3]'` == "null" ]]
+    hostname20=`cat /tmp/listeners.txt | jq -r '.listeners[0].host_name'`
+    hostname21=`cat /tmp/listeners.txt | jq -r '.listeners[1].host_name'`
+    hostname22=`cat /tmp/listeners.txt | jq -r '.listeners[2].host_name'`
+    [[ "$hostname20" == "$hostname21" ]]
+    [[ "$hostname20" == "$hostname22" ]]
+    [[ "$hostname20" == "$hostname0" ]]
+
+    rm -f /tmp/gw_listeners.txt
+    rm -f /tmp/listeners.txt
+    cephnvmf_func --output stdio --format plain gw listener_info --subsystem $NQN > /tmp/gw_listeners.txt
+    cat /tmp/gw_listeners.txt
+    grep "TCP          IPv6              2001:db8::3:4420   No        1: Optimized" /tmp/gw_listeners.txt
+    grep "TCP          IPv4              0.0.0.0:4430       No        1: Optimized" /tmp/gw_listeners.txt
+    grep "TCP          IPv4              192.168.13.3:4420  No        1: Optimized" /tmp/gw_listeners.txt
+
+    set +e
+    tail -n +3 /tmp/gw_listeners.txt | grep -v "Optimized"
+    if [[ $? -eq 0 ]]; then
+        echo "Should only get optimized load balancing states"
+        exit 1
+    fi
+    set -e
+
     return $?
 }
 
