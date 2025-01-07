@@ -565,6 +565,17 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.ana_grp_ns_load = {}
         self.ana_grp_subs_load = defaultdict(dict)
         self.max_ana_grps = self.config.getint_with_default("gateway", "max_gws_in_grp", 16)
+        if self.max_ana_grps > self.max_namespaces:
+            self.logger.warning(f"Maximal number of load balancing groups can't be greather "
+                                f"than the maximal number of namespaces, will truncate "
+                                f"to {self.max_namespaces}")
+            self.max_ana_grps = self.max_namespaces
+
+        if self.max_namespaces_per_subsystem > self.max_namespaces:
+            self.logger.warning(f"Maximal number of namespace per subsystem can't be greater "
+                                f"than the global maximal number of namespaces, will truncate "
+                                f"to {self.max_namespaces}")
+            self.max_namespaces_per_subsystem = self.max_namespaces
 
         for i in range(self.max_ana_grps + 1):
             self.ana_grp_ns_load[i] = 0
@@ -1500,8 +1511,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
         add_namespace_error_prefix = f"Failure adding namespace{nsid_msg} to {subsystem_nqn}"
 
         peer_msg = self.get_peer_message(context)
-        self.logger.info(f"Received request to add {bdev_name} to {subsystem_nqn} with ANA group "
-                         f"id {anagrpid}{nsid_msg}, auto_visible: {auto_visible}, "
+        self.logger.info(f"Received request to add {bdev_name} to {subsystem_nqn} with load "
+                         f"balancing group id {anagrpid}{nsid_msg}, auto_visible: {auto_visible}, "
                          f"context: {context}{peer_msg}")
 
         if subsystem_nqn not in self.subsys_max_ns:
@@ -1746,7 +1757,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                                                         self.gateway_group)
             else:
                 anagrp = self.choose_anagrpid_for_namespace(request.nsid)
-                assert anagrp != 0, "Chosen ANA group is 0"
+                assert anagrp != 0, "Chosen load balancing group is 0"
 
             if request.nsid:
                 ns = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn,
@@ -1788,7 +1799,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 # If an explicit load balancing group was passed, make sure it exists
                 if request.anagrpid != 0:
                     if request.anagrpid not in grps_list:
-                        self.logger.debug(f"ANA groups: {grps_list}")
+                        self.logger.debug(f"Load balancing groups: {grps_list}")
                         errmsg = f"Failure adding namespace {nsid_msg}to " \
                                  f"{request.subsystem_nqn}: Load balancing group " \
                                  f"{request.anagrpid} doesn't exist"
@@ -1897,7 +1908,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             grps_list = self.ceph_utils.get_number_created_gateways(
                 self.gateway_pool, self.gateway_group)
             if request.anagrpid not in grps_list:
-                self.logger.debug(f"ANA groups: {grps_list}")
+                self.logger.debug(f"Load balancing groups: {grps_list}")
                 errmsg = f"{change_lb_group_failure_prefix}: Load balancing group " \
                          f"{request.anagrpid} doesn't exist"
                 self.logger.error(errmsg)
@@ -4167,6 +4178,99 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
     def list_listeners(self, request, context=None):
         return self.execute_grpc_function(self.list_listeners_safe, request, context)
+
+    def show_gateway_listeners_info_safe(self, request, context):
+        """Show gateway's listeners info."""
+
+        peer_msg = self.get_peer_message(context)
+        self.logger.info(f"Received request to show gateway listeners info for "
+                         f"{request.subsystem_nqn}, context: {context}{peer_msg}")
+
+        if self.ana_grp_state[0] != pb2.ana_state.INACCESSIBLE:
+            errmsg = "Internal error, we shouldn't have a real state for load balancing group 0"
+            self.logger.error(errmsg)
+            return pb2.gateway_listeners_info(status=errno.EINVAL,
+                                              error_message=errmsg,
+                                              gw_listeners=[])
+
+        try:
+            ret = rpc_nvmf.nvmf_subsystem_get_listeners(self.spdk_rpc_client,
+                                                        nqn=request.subsystem_nqn)
+            self.logger.debug(f"get_listeners: {ret}")
+        except Exception as ex:
+            errmsg = "Failure listing gateway listeners"
+            self.logger.exception(errmsg)
+            errmsg = f"{errmsg}:\n{ex}"
+            resp = self.parse_json_exeption(ex)
+            status = errno.ENODEV
+            if resp:
+                status = resp["code"]
+                errmsg = f"Failure listing gateway listeners: {resp['message']}"
+            return pb2.gateway_listeners_info(status=status,
+                                              error_message=errmsg,
+                                              gw_listeners=[])
+
+        gw_listeners = []
+        for lstnr in ret:
+            try:
+                secure = False
+                if request.subsystem_nqn in self.subsystem_listeners:
+                    local_lstnr = (lstnr["address"]["adrfam"].lower(),
+                                   lstnr["address"]["traddr"],
+                                   int(lstnr["address"]["trsvcid"]),
+                                   True)
+                    if local_lstnr in self.subsystem_listeners[request.subsystem_nqn]:
+                        secure = True
+                lstnr_part = pb2.listener_info(host_name=self.host_name,
+                                               trtype=lstnr["address"]["trtype"].upper(),
+                                               adrfam=lstnr["address"]["adrfam"].lower(),
+                                               traddr=lstnr["address"]["traddr"],
+                                               trsvcid=int(lstnr["address"]["trsvcid"]),
+                                               secure=secure)
+            except Exception:
+                self.logger.exception(f"Error getting address from {lstnr}")
+                continue
+
+            ana_states = []
+            try:
+                for ana_state in lstnr["ana_states"]:
+                    spdk_group = ana_state["ana_group"]
+                    if spdk_group > self.max_ana_grps:
+                        continue
+                    spdk_state = ana_state["ana_state"]
+                    spdk_state_enum_val = GatewayEnumUtils.get_value_from_key(pb2.ana_state,
+                                                                              spdk_state.upper())
+                    if spdk_state_enum_val is None:
+                        self.logger.error(f"Unknown state \"{spdk_state}\" for "
+                                          f"load balancing group {spdk_group} in SPDK")
+                        continue
+
+                    ana_states.append(pb2.ana_group_state(grp_id=spdk_group,
+                                                          state=spdk_state_enum_val))
+                    if spdk_group in self.ana_grp_state:
+                        if self.ana_grp_state[spdk_group] != spdk_state_enum_val:
+                            gw_state_str = GatewayEnumUtils.get_key_from_value(
+                                pb2.ana_state, self.ana_grp_state[spdk_group])
+                            if gw_state_str is None:
+                                self.logger.error(f'State for load balancing group {spdk_group} '
+                                                  f'is "{self.ana_grp_state[spdk_group]}" '
+                                                  f'but is {spdk_state_enum_val} in SPDK')
+                            else:
+                                self.logger.error(f'State for load balancing group {spdk_group} '
+                                                  f'is "{gw_state_str}" '
+                                                  f'but is "{spdk_state}" in SPDK')
+            except Exception:
+                self.logger.exception(f"Error parsing load balancing state {ana_state}")
+                continue
+
+            gw_lstnr = pb2.gateway_listener_info(listener=lstnr_part, lb_states=ana_states)
+            gw_listeners.append(gw_lstnr)
+
+        return pb2.gateway_listeners_info(status=0, error_message=os.strerror(0),
+                                          gw_listeners=gw_listeners)
+
+    def show_gateway_listeners_info(self, request, context=None):
+        return self.execute_grpc_function(self.show_gateway_listeners_info_safe, request, context)
 
     def list_subsystems_safe(self, request, context):
         """List subsystems."""

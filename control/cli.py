@@ -511,9 +511,87 @@ class GatewayClient:
         else:
             assert False
 
+    def gw_listener_info(self, args):
+        """Show gateway's listeners info"""
+
+        out_func, err_func = self.get_output_functions(args)
+        listeners_info = None
+        try:
+            list_req = pb2.show_gateway_listeners_info_req(subsystem_nqn=args.subsystem)
+            listeners_info = self.stub.show_gateway_listeners_info(list_req)
+        except Exception as ex:
+            listeners_info = pb2.gateway_listeners_info(status=errno.EINVAL,
+                                                        error_message=f"Failure listing gateway "
+                                                                      f"listeners info:\n{ex}",
+                                                        gw_listeners=[])
+
+        if args.format == "text" or args.format == "plain":
+            if listeners_info.status == 0:
+                listeners_list = []
+                for lstnr in listeners_info.gw_listeners:
+                    ana_states = ""
+                    for ana in lstnr.lb_states:
+                        if not args.verbose and ana.state != pb2.ana_state.OPTIMIZED:
+                            continue
+                        state_str = GatewayEnumUtils.get_key_from_value(pb2.ana_state, ana.state)
+                        if state_str is None:
+                            ana_states += str(ana.grp_id) + ": " + str(ana.state) + "\n"
+                        else:
+                            ana_states += str(ana.grp_id) + ": " + state_str.title() + "\n"
+                    adrfam = GatewayEnumUtils.get_key_from_value(pb2.AddressFamily,
+                                                                 lstnr.listener.adrfam)
+                    adrfam = self.format_adrfam(adrfam)
+                    secure = "Yes" if lstnr.listener.secure else "No"
+                    ana_states = ana_states.removesuffix("\n")
+                    listeners_list.append([lstnr.listener.host_name,
+                                           lstnr.listener.trtype,
+                                           adrfam,
+                                           f"{lstnr.listener.traddr}:{lstnr.listener.trsvcid}",
+                                           secure,
+                                           ana_states])
+                if len(listeners_list) > 0:
+                    if args.format == "text":
+                        table_format = "fancy_grid"
+                    else:
+                        table_format = "plain"
+                    listeners_out = tabulate(listeners_list,
+                                             headers=["Host",
+                                                      "Transport",
+                                                      "Address Family",
+                                                      "Address",
+                                                      "Secure",
+                                                      "Load Balancing Group ID/State"],
+                                             tablefmt=table_format)
+                    out_func(f"Gateway listeners for {args.subsystem}:\n{listeners_out}")
+                else:
+                    out_func(f"No gateway listeners for {args.subsystem}")
+            else:
+                err_func(f"{listeners_info.error_message}")
+        elif args.format == "json" or args.format == "yaml":
+            ret_str = json_format.MessageToJson(listeners_info, indent=4,
+                                                including_default_value_fields=True,
+                                                preserving_proto_field_name=True)
+            if args.format == "json":
+                out_func(ret_str)
+            elif args.format == "yaml":
+                obj = json.loads(ret_str)
+                out_func(yaml.dump(obj))
+        elif args.format == "python":
+            return listeners_info
+        else:
+            assert False
+
+        return listeners_info.status
+
     gw_set_log_level_args = [
         argument("--level", "-l", help="Gateway log level", required=True,
                  type=str, choices=get_enum_keys_list(pb2.GwLogLevel, False)),
+    ]
+    gw_listener_info_args = [
+        argument("--subsystem",
+                 "-n",
+                 help="Subsystem NQN",
+                 required=True),
     ]
     gw_actions = []
     gw_actions.append({"name": "version",
@@ -528,6 +606,9 @@ class GatewayClient:
     gw_actions.append({"name": "set_log_level",
                        "args": gw_set_log_level_args,
                        "help": "Set gateway's log level"})
+    gw_actions.append({"name": "listener_info",
+                       "args": gw_listener_info_args,
+                       "help": "Show listeners information for the gateway"})
     gw_choices = get_actions(gw_actions)
 
     @cli.cmd(gw_actions)
@@ -542,6 +623,8 @@ class GatewayClient:
             return self.gw_get_log_level(args)
         elif args.action == "set_log_level":
             return self.gw_set_log_level(args)
+        elif args.action == "listener_info":
+            return self.gw_listener_info(args)
         if not args.action:
             self.cli.parser.error(f"missing action for gw command (choose from "
                                   f"{GatewayClient.gw_choices})")
