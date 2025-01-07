@@ -1174,9 +1174,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                      error_message=errmsg,
                                      nqn=request.subsystem_nqn)
 
-        if not request.max_namespaces:
-            request.max_namespaces = self.max_namespaces_per_subsystem
-        else:
+        if request.max_namespaces:
             if request.max_namespaces > self.max_namespaces:
                 self.logger.warning(f"The requested max number of namespaces for subsystem "
                                     f"{request.subsystem_nqn} ({request.max_namespaces}) is "
@@ -1232,31 +1230,35 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                              error_message=errmsg,
                                              nqn=request.subsystem_nqn)
 
-        if context:
-            if request.no_group_append or not self.gateway_group:
-                self.logger.info("Subsystem NQN will not be changed")
-            else:
-                group_name_to_use = self.gateway_group.replace(GatewayState.OMAP_KEY_DELIMITER,
-                                                               "-")
-                request.subsystem_nqn += f".{group_name_to_use}"
-                self.logger.info(f"Subsystem NQN was changed to {request.subsystem_nqn}, "
-                                 f"adding the group name")
-
         # Set client ID range according to group id assigned by the monitor
         offset = self.group_id * CNTLID_RANGE_SIZE
         min_cntlid = offset + 1
         max_cntlid = offset + CNTLID_RANGE_SIZE
 
-        if not request.serial_number:
-            random.seed()
-            randser = random.randint(2, 99999999999999)
-            request.serial_number = f"Ceph{randser}"
-            self.logger.info(f"No serial number specified for {request.subsystem_nqn}, will "
-                             f"use {request.serial_number}")
-
         ret = False
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
+            if not request.max_namespaces:
+                request.max_namespaces = self.max_namespaces_per_subsystem
+
+            if not request.serial_number:
+                random.seed()
+                randser = random.randint(2, 99999999999999)
+                request.serial_number = f"Ceph{randser}"
+                self.logger.info(f"No serial number specified for {request.subsystem_nqn}, will "
+                                 f"use {request.serial_number}")
+
+            if context:
+
+                if request.no_group_append or not self.gateway_group:
+                    self.logger.info("Subsystem NQN will not be changed")
+                else:
+                    group_name_to_use = self.gateway_group.replace(
+                        GatewayState.OMAP_KEY_DELIMITER, "-")
+                    request.subsystem_nqn += f".{group_name_to_use}"
+                    request.no_group_append = True
+                    self.logger.info(f"Subsystem NQN was changed to {request.subsystem_nqn}, "
+                                     f"adding the group name")
             errmsg = ""
             try:
                 subsys_using_serial = None
@@ -2274,7 +2276,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """List namespaces."""
 
         peer_msg = self.get_peer_message(context)
-        if request.nsid is None or request.nsid == 0:
+        if not request.nsid:
             if request.uuid:
                 nsid_msg = f"namespace with UUID {request.uuid}"
             else:
@@ -2567,28 +2569,28 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                  f"limits are set for namespace {request.nsid} on "
                                  f"{request.subsystem_nqn}")
 
-        # Merge current limits with previous ones, if exist
-        if ns_qos_entry:
-            if not request.HasField("rw_ios_per_second") and ns_qos_entry.get(
-                    "rw_ios_per_second") is not None:
-                request.rw_ios_per_second = int(ns_qos_entry["rw_ios_per_second"])
-            if not request.HasField("rw_mbytes_per_second") and ns_qos_entry.get(
-                    "rw_mbytes_per_second") is not None:
-                request.rw_mbytes_per_second = int(ns_qos_entry["rw_mbytes_per_second"])
-            if not request.HasField("r_mbytes_per_second") and ns_qos_entry.get(
-                    "r_mbytes_per_second") is not None:
-                request.r_mbytes_per_second = int(ns_qos_entry["r_mbytes_per_second"])
-            if not request.HasField("w_mbytes_per_second") and ns_qos_entry.get(
-                    "w_mbytes_per_second") is not None:
-                request.w_mbytes_per_second = int(ns_qos_entry["w_mbytes_per_second"])
-
-            limits_to_set = self.get_qos_limits_string(request)
-            self.logger.debug(f"After merging current QOS limits with previous ones for "
-                              f"namespace {request.nsid} on {request.subsystem_nqn},"
-                              f"{limits_to_set}")
-
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
+            # Merge current limits with previous ones, if exist
+            if ns_qos_entry:
+                assert context, "Shouldn't get here on an update"
+                if not request.HasField("rw_ios_per_second") and ns_qos_entry.get(
+                        "rw_ios_per_second") is not None:
+                    request.rw_ios_per_second = int(ns_qos_entry["rw_ios_per_second"])
+                if not request.HasField("rw_mbytes_per_second") and ns_qos_entry.get(
+                        "rw_mbytes_per_second") is not None:
+                    request.rw_mbytes_per_second = int(ns_qos_entry["rw_mbytes_per_second"])
+                if not request.HasField("r_mbytes_per_second") and ns_qos_entry.get(
+                        "r_mbytes_per_second") is not None:
+                    request.r_mbytes_per_second = int(ns_qos_entry["r_mbytes_per_second"])
+                if not request.HasField("w_mbytes_per_second") and ns_qos_entry.get(
+                        "w_mbytes_per_second") is not None:
+                    request.w_mbytes_per_second = int(ns_qos_entry["w_mbytes_per_second"])
+
+                limits_to_set = self.get_qos_limits_string(request)
+                self.logger.debug(f"After merging current QOS limits with previous ones for "
+                                  f"namespace {request.nsid} on {request.subsystem_nqn},"
+                                  f"{limits_to_set}")
             try:
                 ret = rpc_bdev.bdev_set_qos_limit(
                     self.spdk_rpc_client,

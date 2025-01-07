@@ -1048,7 +1048,7 @@ class GatewayStateHandler:
             local_version = self.omap.get_local_version()
 
             self.logger.info(f"Check local version {local_version} against OMAP version "
-                             f"{omap_version}")
+                             f"{omap_version} ({self.id_text}).")
             if local_version < omap_version:
                 self.logger.info(f"Start update from {local_version} to {omap_version} "
                                  f"({self.id_text}).")
