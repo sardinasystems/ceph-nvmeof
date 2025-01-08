@@ -55,6 +55,7 @@ class GatewayEnumUtils:
 
 class GatewayUtils:
     DISCOVERY_NQN = "nqn.2014-08.org.nvmexpress.discovery"
+    ALL_SUBSYSTEMS = "*"
 
     # We need to enclose IPv6 addresses in brackets before concatenating
     # a colon and port number to it

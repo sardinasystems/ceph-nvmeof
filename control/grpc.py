@@ -2290,14 +2290,14 @@ class GatewayService(pb2_grpc.GatewayServicer):
                          f"context: {context}{peer_msg}")
 
         if not request.subsystem:
-            errmsg = "Failure listing namespaces, missing subsystem NQN"
-            self.logger.error(errmsg)
-            return pb2.namespaces_info(status=errno.EINVAL, error_message=errmsg,
-                                       subsystem_nqn=request.subsystem, namespaces=[])
+            request.subsystem = GatewayUtils.ALL_SUBSYSTEMS
 
         with self.rpc_lock:
             try:
-                ret = rpc_nvmf.nvmf_get_subsystems(self.spdk_rpc_client, nqn=request.subsystem)
+                if request.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                    ret = rpc_nvmf.nvmf_get_subsystems(self.spdk_rpc_client)
+                else:
+                    ret = rpc_nvmf.nvmf_get_subsystems(self.spdk_rpc_client, nqn=request.subsystem)
                 self.logger.debug(f"list_namespaces: {ret}")
             except Exception as ex:
                 errmsg = "Failure listing namespaces"
@@ -2314,17 +2314,19 @@ class GatewayService(pb2_grpc.GatewayServicer):
         namespaces = []
         for s in ret:
             try:
-                if s["nqn"] != request.subsystem:
-                    self.logger.warning(f'Got subsystem {s["nqn"]} instead of '
-                                        f'{request.subsystem}, ignore')
-                    continue
+                subsys_nqn = s["nqn"]
+                if request.subsystem != GatewayUtils.ALL_SUBSYSTEMS:
+                    if subsys_nqn != request.subsystem:
+                        self.logger.warning(f'Got subsystem {subsys_nqn} instead of '
+                                            f'{request.subsystem}, ignore')
+                        continue
                 try:
                     ns_list = s["namespaces"]
                 except Exception:
                     ns_list = []
                     pass
                 if not ns_list:
-                    self.subsystem_nsid_bdev_and_uuid.remove_namespace(request.subsystem)
+                    self.subsystem_nsid_bdev_and_uuid.remove_namespace(subsys_nqn)
                 for n in ns_list:
                     nsid = n["nsid"]
                     bdev_name = n["bdev_name"]
@@ -2341,18 +2343,19 @@ class GatewayService(pb2_grpc.GatewayServicer):
                         lb_group = n["anagrpid"]
                     except KeyError:
                         pass
-                    find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem,
+                    find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(subsys_nqn,
                                                                                 nsid)
                     if find_ret.empty():
                         self.logger.warning(f"Can't find info of namesapce {nsid} in "
-                                            f"{request.subsystem}. Visibility status "
+                                            f"{subsys_nqn}. Visibility status "
                                             f"will be inaccurate")
                     one_ns = pb2.namespace_cli(nsid=nsid,
                                                bdev_name=bdev_name,
                                                uuid=n["uuid"],
                                                load_balancing_group=lb_group,
                                                auto_visible=find_ret.auto_visible,
-                                               hosts=find_ret.host_list)
+                                               hosts=find_ret.host_list,
+                                               subsystem_nqn=subsys_nqn)
                     with self.rpc_lock:
                         ns_bdev = self.get_bdev_info(bdev_name)
                     if ns_bdev is None:
@@ -2379,7 +2382,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
                             self.logger.exception(f"{ns_bdev=} parse error")
                             pass
                     namespaces.append(one_ns)
-                break
+                if request.subsystem != GatewayUtils.ALL_SUBSYSTEMS:
+                    break
             except Exception:
                 self.logger.exception(f"{s=} parse error")
                 pass
