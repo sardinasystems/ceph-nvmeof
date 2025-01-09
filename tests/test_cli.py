@@ -24,6 +24,10 @@ image11 = "mytestdevimage11"
 image12 = "mytestdevimage12"
 image13 = "mytestdevimage13"
 image14 = "mytestdevimage14"
+image15 = "mytestdevimage15"
+image16 = "mytestdevimage16"
+image17 = "mytestdevimage17"
+image18 = "mytestdevimage18"
 pool = "rbd"
 subsystem = "nqn.2016-06.io.spdk:cnode1"
 subsystem2 = "nqn.2016-06.io.spdk:cnode2"
@@ -33,6 +37,7 @@ subsystem5 = "nqn.2016-06.io.spdk:cnode5"
 subsystem6 = "nqn.2016-06.io.spdk:cnode6"
 subsystem7 = "nqn.2016-06.io.spdk:cnode7"
 subsystem8 = "nqn.2016-06.io.spdk:cnode8"
+subsystem9 = "nqn.2016-06.io.spdk:cnode9"
 subsystemX = "nqn.2016-06.io.spdk:cnodeX"
 discovery_nqn = "nqn.2014-08.org.nvmexpress.discovery"
 serial = "Ceph00000000000001"
@@ -80,7 +85,7 @@ def gateway(config):
     config.config["gateway"]["group"] = group_name
     config.config["gateway"]["max_namespaces_with_netmask"] = "3"
     config.config["gateway"]["max_hosts_per_namespace"] = "3"
-    config.config["gateway"]["max_subsystems"] = "3"
+    config.config["gateway"]["max_subsystems"] = "4"
     config.config["gateway"]["max_namespaces"] = "12"
     config.config["gateway"]["max_namespaces_per_subsystem"] = "11"
     config.config["gateway"]["max_hosts_per_subsystem"] = "4"
@@ -170,7 +175,7 @@ class TestGet:
         assert gw_info.spdk_version == spdk_ver
         assert gw_info.name == gw.gateway_name
         assert gw_info.hostname == gw.host_name
-        assert gw_info.max_subsystems == 3
+        assert gw_info.max_subsystems == 4
         assert gw_info.max_namespaces == 12
         assert gw_info.max_namespaces_per_subsystem == 11
         assert gw_info.max_hosts_per_subsystem == 4
@@ -1238,6 +1243,78 @@ class TestCreate:
         cli(["listener", "add", "--host-name", host_name] + listener)
         assert "Can't create a listener for a discovery subsystem" in caplog.text
 
+    def test_list_namespaces_all_subsystems(self, caplog):
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem9, "--no-group-append"])
+        assert f"Adding subsystem {subsystem9}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem, "--nsid", "10"])
+        assert f"Deleting namespace 10 from {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem, "--nsid", "11"])
+        assert f"Deleting namespace 11 from {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem, "--nsid", "12"])
+        assert f"Deleting namespace 12 from {subsystem}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem9, "--rbd-pool", pool,
+             "--rbd-image", image15, "--size", "16MB", "--rbd-create-image"])
+        assert f"Adding namespace 1 to {subsystem9}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem9, "--rbd-pool", pool,
+             "--rbd-image", image16, "--size", "16MB", "--rbd-create-image"])
+        assert f"Adding namespace 2 to {subsystem9}: Successful" in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list"])
+        assert '"subsystem_nqn": "*"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem9}"' in caplog.text
+        assert '"nsid": 1' in caplog.text
+        assert '"nsid": 2' in caplog.text
+        assert '"nsid": 6' in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--nsid", "1"])
+        assert '"subsystem_nqn": "*"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem9}"' in caplog.text
+        assert '"nsid": 1' in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--nsid", "6"])
+        assert '"subsystem_nqn": "*"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem9}"' not in caplog.text
+        assert '"nsid": 6' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--uuid", uuid])
+        assert '"subsystem_nqn": "*"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"subsystem_nqn": "{subsystem9}"' not in caplog.text
+        assert f'"uuid": "{uuid}"' in caplog.text
+
+    def test_namespace_count_updated(self, caplog):
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem5, "--no-group-append"])
+        assert f"Adding subsystem {subsystem5}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem5, "--rbd-pool", pool,
+             "--rbd-image", image17, "--size", "16MB", "--rbd-create-image"])
+        assert f"Adding namespace 1 to {subsystem5}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem5, "--rbd-pool", pool,
+             "--rbd-image", image18, "--size", "16MB", "--rbd-create-image"])
+        assert f"Failure adding namespace to {subsystem5}: Maximal number of namespaces (12) " \
+               f"has already been reached" in caplog.text
+        caplog.clear()
+        cli(["subsystem", "del", "--subsystem", subsystem9, "--force"])
+        assert f"Deleting subsystem {subsystem9}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem5, "--rbd-pool", pool,
+             "--rbd-image", image18, "--size", "16MB", "--rbd-create-image"])
+        assert f"Adding namespace 2 to {subsystem5}: Successful" in caplog.text
+
 
 class TestDelete:
     @pytest.mark.parametrize("host", host_list)
@@ -1392,6 +1469,9 @@ class TestDelete:
         cli(["subsystem", "del", "--subsystem", subsystem2])
         assert f"Deleting subsystem {subsystem2}: Successful" in caplog.text
         caplog.clear()
+        cli(["subsystem", "del", "--subsystem", subsystem5, "--force"])
+        assert f"Deleting subsystem {subsystem5}: Successful" in caplog.text
+        caplog.clear()
         cli(["subsystem", "list"])
         assert "No subsystems" in caplog.text
 
@@ -1493,8 +1573,14 @@ class TestTooManySubsystemsAndHosts:
         assert f"Adding subsystem {subsystem6}: Successful" in caplog.text
         caplog.clear()
         cli(["subsystem", "add", "--subsystem", subsystem7, "--no-group-append"])
-        assert f"Failure creating subsystem {subsystem7}: Maximal number of subsystems (3) has " \
+        assert f"Adding subsystem {subsystem7}: Successful" in caplog.text
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem8, "--no-group-append"])
+        assert f"Failure creating subsystem {subsystem8}: Maximal number of subsystems (4) has " \
                f"already been reached" in caplog.text
+        caplog.clear()
+        cli(["subsystem", "del", "--subsystem", subsystem7])
+        assert f"Deleting subsystem {subsystem7}: Successful" in caplog.text
 
     def test_too_many_hosts(self, caplog, gateway):
         caplog.clear()

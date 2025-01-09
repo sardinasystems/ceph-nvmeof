@@ -322,6 +322,7 @@ jobs:
               cephnvmf listener list --subsystem $sub
               cephnvmf host list --subsystem $sub
           done
+          cephnvmf namespace list
 
       - name: Run bdevperf
         run: |

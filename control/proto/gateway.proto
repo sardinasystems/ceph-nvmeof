@@ -523,6 +523,7 @@ message namespace_cli {
 	uint64 w_mbytes_per_second = 12;
 	bool auto_visible = 13;
 	repeated string hosts = 14;
+	optional string subsystem_nqn = 15;
 }
 
 message namespaces_info {

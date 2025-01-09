@@ -1898,6 +1898,9 @@ class GatewayClient:
         if args.nsid is not None and args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
+        if not args.subsystem:
+            args.subsystem = GatewayUtils.ALL_SUBSYSTEMS
+
         try:
             namespaces_info = self.stub.list_namespaces(pb2.list_namespaces_req(
                 subsystem=args.subsystem,
@@ -1909,12 +1912,32 @@ class GatewayClient:
 
         if args.format == "text" or args.format == "plain":
             if namespaces_info.status == 0:
-                if args.nsid and len(namespaces_info.namespaces) > 1:
-                    err_func(f"Got more than one namespace for NSID {args.nsid}")
-                if args.uuid and len(namespaces_info.namespaces) > 1:
-                    err_func(f"Got more than one namespace for UUID {args.uuid}")
+                if args.subsystem != GatewayUtils.ALL_SUBSYSTEMS:
+                    if args.nsid and len(namespaces_info.namespaces) > 1:
+                        err_func(f"Got more than one namespace for namespace ID {args.nsid}")
+                    if args.uuid and len(namespaces_info.namespaces) > 1:
+                        err_func(f"Got more than one namespace for UUID {args.uuid}")
+                    if namespaces_info.subsystem_nqn != args.subsystem:
+                        err_func(f"Got namespaces in subsystem "
+                                 f"{namespaces_info.subsystem_nqn} which is different than the "
+                                 f"requested subsystem {args.subsystem}")
+                        return errno.ENODEV
                 namespaces_list = []
                 for ns in namespaces_info.namespaces:
+                    if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                        if not ns.subsystem_nqn:
+                            err_func(f"Got namespace with ID {ns.nsid} on an unknown subsystem")
+                            subsys_nqn = "<n/a>"
+                        else:
+                            subsys_nqn = ns.subsystem_nqn
+                    else:
+                        if ns.subsystem_nqn and ns.subsystem_nqn != args.subsystem:
+                            err_func(f"Got a namespace with ID {ns.nsid} in subsystem "
+                                     f"{ns.subsystem_nqn} which is different than the "
+                                     f"requested one {args.subsystem}")
+                            return errno.ENODEV
+                        subsys_nqn = namespaces_info.subsystem_nqn
+
                     if args.nsid and args.nsid != ns.nsid:
                         err_func(f"Failure listing namespace {args.nsid}: "
                                  f"Got namespace {ns.nsid} instead")
@@ -1937,7 +1960,8 @@ class GatewayClient:
                         else:
                             visibility = "Restrictive"
 
-                    namespaces_list.append([ns.nsid,
+                    namespaces_list.append([subsys_nqn,
+                                            ns.nsid,
                                             break_string(ns.bdev_name, "-", 2),
                                             f"{ns.rbd_pool_name}/{ns.rbd_image_name}",
                                             self.format_size(ns.rbd_image_size),
@@ -1956,7 +1980,8 @@ class GatewayClient:
                     else:
                         table_format = "plain"
                     namespaces_out = tabulate(namespaces_list,
-                                              headers=["NSID",
+                                              headers=["NQN",
+                                                       "NSID",
                                                        "Bdev\nName",
                                                        "RBD\nImage",
                                                        "Image\nSize",
@@ -1975,15 +2000,27 @@ class GatewayClient:
                         prefix = f"Namespace with UUID {args.uuid} in"
                     else:
                         prefix = "Namespaces in"
-                    out_func(f"{prefix} subsystem {args.subsystem}:\n{namespaces_out}")
+                    if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                        out_func(f"{prefix} all subsystems:\n{namespaces_out}")
+                    else:
+                        out_func(f"{prefix} subsystem {args.subsystem}:\n{namespaces_out}")
                 else:
                     if args.nsid:
-                        out_func(f"No namespace {args.nsid} in subsystem {args.subsystem}")
+                        if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                            out_func(f"No namespace {args.nsid} in any subsystem")
+                        else:
+                            out_func(f"No namespace {args.nsid} in subsystem {args.subsystem}")
                     elif args.uuid:
-                        out_func(f"No namespace with UUID {args.uuid} in subsystem "
-                                 f"{args.subsystem}")
+                        if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                            out_func(f"No namespace with UUID {args.uuid} in any subsystem")
+                        else:
+                            out_func(f"No namespace with UUID {args.uuid} in subsystem "
+                                     f"{args.subsystem}")
                     else:
-                        out_func(f"No namespaces in subsystem {args.subsystem}")
+                        if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
+                            out_func("No namespaces in any subsystem")
+                        else:
+                            out_func(f"No namespaces in subsystem {args.subsystem}")
             else:
                 err_func(f"{namespaces_info.error_message}")
         elif args.format == "json" or args.format == "yaml":
@@ -2433,7 +2470,11 @@ class GatewayClient:
                  help="Size in bytes or specified unit (K, KB, M, MB, G, GB, T, TB, P, PB)",
                  required=True),
     ]
-    ns_list_args_list = ns_common_args + [
+    ns_list_args_list = [
+        argument("--subsystem",
+                 "-n",
+                 help="Subsystem NQN",
+                 required=False),
         argument("--nsid",
                  help="Namespace ID",
                  type=int),
