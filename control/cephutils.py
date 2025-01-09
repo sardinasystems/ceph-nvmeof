@@ -25,6 +25,7 @@ class CephUtils:
         self.anagroup_list = []
         self.rebalance_supported = False
         self.rebalance_ana_group = 0
+        self.num_gws = 0
         self.last_sent = time.time()
 
     def execute_ceph_monitor_command(self, cmd):
@@ -58,9 +59,12 @@ class CephUtils:
     def get_rebalance_ana_group(self):
         return self.rebalance_ana_group
 
-    def get_number_created_gateways(self, pool, group):
+    def get_num_gws(self):
+        return self.num_gws
+
+    def get_number_created_gateways(self, pool, group, caching=True):
         now = time.time()
-        if (now - self.last_sent) < 10 and self.anagroup_list:
+        if caching and ((now - self.last_sent) < 10) and self.anagroup_list:
             self.logger.info(f"Caching response of the monitor: {self.anagroup_list}")
             return self.anagroup_list
         else:
@@ -77,7 +81,9 @@ class CephUtils:
                     data = json.loads(conv_str)
                     self.rebalance_supported = True
                     self.rebalance_ana_group = data.get("rebalance_ana_group", None)
-                    self.logger.debug(f"Rebalance ana_group: {self.rebalance_ana_group}")
+                    self.num_gws = data.get("num gws", None)
+                    self.logger.info(f"Rebalance ana_group: {self.rebalance_ana_group},\
+                                      num-gws: {self.num_gws} ")
                 else:
                     self.rebalance_supported = False
                 pos = conv_str.find("[")

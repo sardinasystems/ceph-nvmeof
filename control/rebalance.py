@@ -30,6 +30,7 @@ class Rebalance:
             "gateway",
             "max_ns_to_change_lb_grp",
             8)
+        self.last_scale_down_ts = time.time()
         self.rebalance_event = threading.Event()
         self.logger.info(f" Starting rebalance thread: period: {self.rebalance_period_sec},"
                          f" max number ns to move: {self.rebalance_max_ns_to_change_lb_grp}")
@@ -102,12 +103,13 @@ class Rebalance:
     #    and reballance results will be accurate. Monitor in nvme-gw show response publishes the
     #    index of ANA group that is currently responsible for rebalance
     def rebalance_logic(self, request, context) -> int:
+        now = time.time()
         worker_ana_group = self.ceph_utils.get_rebalance_ana_group()
         self.logger.debug(f"Called rebalance logic: current rebalancing ana "
                           f"group {worker_ana_group}")
         ongoing_scale_down_rebalance = False
         grps_list = self.ceph_utils.get_number_created_gateways(self.gw_srv.gateway_pool,
-                                                                self.gw_srv.gateway_group)
+                                                                self.gw_srv.gateway_group, False)
         if not self.ceph_utils.is_rebalance_supported():
             self.logger.info("Auto rebalance is not supported with the curent ceph version")
             return 1
@@ -119,6 +121,7 @@ class Rebalance:
                     ongoing_scale_down_rebalance = True
                     self.logger.info(f"Scale-down rebalance is ongoing for ANA group {ana_grp} "
                                      f"current load {self.gw_srv.ana_grp_ns_load[ana_grp]}")
+                    self.last_scale_down_ts = now
                     break
         num_active_ana_groups = len(grps_list)
         for ana_grp in self.gw_srv.ana_grp_state:
@@ -144,8 +147,11 @@ class Rebalance:
                                          f"GW still appears Optimized")
                         return 1
                 else:
-                    if not ongoing_scale_down_rebalance and \
-                       (self.gw_srv.ana_grp_state[worker_ana_group] == pb2.ana_state.OPTIMIZED):
+                    # keep  hysteresis interval between scale-down and regular rebalance
+                    hysteresis = 2.5 * self.rebalance_period_sec
+                    if not ongoing_scale_down_rebalance \
+                       and ((now - self.last_scale_down_ts) > hysteresis) \
+                       and (self.gw_srv.ana_grp_state[worker_ana_group] == pb2.ana_state.OPTIMIZED):
                         # if my optimized ana group == worker-ana-group or worker-ana-group is
                         # also in optimized state on this GW machine
 
@@ -182,6 +188,17 @@ class Rebalance:
                                                       f"{min_ana_grp}, load {min_load} does not "
                                                       f"fit rebalance criteria!")
                                     continue
+            if ongoing_scale_down_rebalance and (num_active_ana_groups == self.ceph_utils.num_gws):
+                # this GW feels scale_down condition on ana_grp but no GW in Deleting
+                # state in the current mon.map . Experimental code - just for logs
+                self.logger.info(f"Seems like scale-down deadlock on group {ana_grp}")
+                if (self.gw_srv.ana_grp_state[worker_ana_group]) == pb2.ana_state.OPTIMIZED:
+                    min_ana_grp, chosen_nqn = self.find_min_loaded_group(grps_list)
+                    if chosen_nqn != "null":
+                        self.logger.info(f"Start rebalance (deadlock resolving) dest. ana group"
+                                         f" {min_ana_grp}, subsystem {chosen_nqn}")
+                        # self.ns_rebalance(context, ana_grp, min_ana_grp, 1, "0")
+                        return 0
         return 1
 
     def ns_rebalance(self, context, ana_id, dest_ana_id, num, subs_nqn) -> int:
