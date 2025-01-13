@@ -1908,7 +1908,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         # the local rebalance logic.
         if context:
             grps_list = self.ceph_utils.get_number_created_gateways(
-                self.gateway_pool, self.gateway_group)
+                self.gateway_pool, self.gateway_group, False)
             if request.anagrpid not in grps_list:
                 self.logger.debug(f"Load balancing groups: {grps_list}")
                 errmsg = f"{change_lb_group_failure_prefix}: Load balancing group " \
