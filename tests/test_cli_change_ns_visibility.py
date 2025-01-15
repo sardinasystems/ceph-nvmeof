@@ -77,7 +77,7 @@ def test_change_namespace_visibility(caplog, two_gateways):
     assert '"auto_visible": true' in caplog.text
     caplog.clear()
     cli(["namespace", "change_visibility", "--subsystem", subsystem,
-         "--nsid", "1", "--no-auto-visible"])
+         "--nsid", "1", "--auto-visible", "no"])
     assert f'Changing visibility of namespace 1 in {subsystem} to "visible to selected hosts": ' \
            f'Successful' in caplog.text
     assert f'Received request to change the visibility of namespace 1 in {subsystem} ' \
@@ -93,7 +93,7 @@ def test_change_namespace_visibility(caplog, two_gateways):
     assert '"auto_visible":' not in caplog.text or '"auto_visible": false' in caplog.text
     caplog.clear()
     cli(["--server-port", "5502", "namespace", "change_visibility",
-         "--subsystem", subsystem, "--nsid", "1", "--auto-visible"])
+         "--subsystem", subsystem, "--nsid", "1", "--auto-visible", "yes"])
     assert f'Changing visibility of namespace 1 in {subsystem} to "visible to all hosts": ' \
            f'Successful' in caplog.text
     assert f'Received request to change the visibility of namespace 1 in {subsystem} to ' \

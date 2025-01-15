@@ -829,6 +829,7 @@ class GatewayServer:
                     req = json_format.Parse(val,
                                             pb2.namespace_delete_req(),
                                             ignore_unknown_fields=True)
+                    req.i_am_sure = True
                     self.gateway_rpc.namespace_delete(req)
             elif key.startswith(GatewayState.NAMESPACE_QOS_PREFIX):
                 if is_add_req:
@@ -866,6 +867,11 @@ class GatewayServer:
                     req = json_format.Parse(val, pb2.namespace_change_visibility_req(),
                                             ignore_unknown_fields=True)
                     self.gateway_rpc.namespace_change_visibility(req)
+            elif key.startswith(GatewayState.NAMESPACE_TRASH_IMAGE_PREFIX):
+                if is_add_req:
+                    req = json_format.Parse(val, pb2.namespace_set_rbd_trash_image_req(),
+                                            ignore_unknown_fields=True)
+                    self.gateway_rpc.namespace_set_rbd_trash_image(req)
             elif key.startswith(GatewayState.NAMESPACE_HOST_PREFIX):
                 if is_add_req:
                     req = json_format.Parse(val, pb2.namespace_add_host_req(),

@@ -1726,6 +1726,10 @@ class GatewayClient:
                 self.cli.parser.error("--size argument is not allowed for add command when "
                                       "RBD image creation is disabled")
 
+        if args.rbd_trash_image_on_delete and not args.rbd_create_image:
+            self.cli.parser.error("Can't trash associated RBD image on delete if it wasn't "
+                                  "created automatically by the gateway")
+
         req = pb2.namespace_add_req(rbd_pool_name=args.rbd_pool,
                                     rbd_image_name=args.rbd_image,
                                     subsystem_nqn=args.subsystem,
@@ -1736,7 +1740,8 @@ class GatewayClient:
                                     create_image=args.rbd_create_image,
                                     size=img_size,
                                     force=args.force,
-                                    no_auto_visible=args.no_auto_visible)
+                                    no_auto_visible=args.no_auto_visible,
+                                    trash_image=args.rbd_trash_image_on_delete)
         try:
             ret = self.stub.namespace_add(req)
         except Exception as ex:
@@ -1776,7 +1781,7 @@ class GatewayClient:
 
         try:
             ret = self.stub.namespace_delete(pb2.namespace_delete_req(
-                subsystem_nqn=args.subsystem, nsid=args.nsid))
+                subsystem_nqn=args.subsystem, nsid=args.nsid, i_am_sure=args.i_am_sure))
         except Exception as ex:
             ret = pb2.req_status(status=errno.EINVAL,
                                  error_message=f"Failure deleting namespace:\n{ex}")
@@ -1925,15 +1930,15 @@ class GatewayClient:
                 namespaces_list = []
                 for ns in namespaces_info.namespaces:
                     if args.subsystem == GatewayUtils.ALL_SUBSYSTEMS:
-                        if not ns.subsystem_nqn:
+                        if not ns.ns_subsystem_nqn:
                             err_func(f"Got namespace with ID {ns.nsid} on an unknown subsystem")
                             subsys_nqn = "<n/a>"
                         else:
-                            subsys_nqn = ns.subsystem_nqn
+                            subsys_nqn = ns.ns_subsystem_nqn
                     else:
-                        if ns.subsystem_nqn and ns.subsystem_nqn != args.subsystem:
+                        if ns.ns_subsystem_nqn and ns.ns_subsystem_nqn != args.subsystem:
                             err_func(f"Got a namespace with ID {ns.nsid} in subsystem "
-                                     f"{ns.subsystem_nqn} which is different than the "
+                                     f"{ns.ns_subsystem_nqn} which is different than the "
                                      f"requested one {args.subsystem}")
                             return errno.ENODEV
                         subsys_nqn = namespaces_info.subsystem_nqn
@@ -1960,10 +1965,11 @@ class GatewayClient:
                         else:
                             visibility = "Restrictive"
 
+                    trash_msg = "\n(trash on delete)" if ns.trash_image else ""
                     namespaces_list.append([subsys_nqn,
                                             ns.nsid,
                                             break_string(ns.bdev_name, "-", 2),
-                                            f"{ns.rbd_pool_name}/{ns.rbd_image_name}",
+                                            f"{ns.rbd_pool_name}/{ns.rbd_image_name}{trash_msg}",
                                             self.format_size(ns.rbd_image_size),
                                             self.format_size(ns.block_size),
                                             break_string(ns.uuid, "-", 3),
@@ -2360,23 +2366,13 @@ class GatewayClient:
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
-        if not args.auto_visible and not args.no_auto_visible:
-            self.cli.parser.error("Either --auto-visible or --no-auto-visible should be specified")
-
-        if args.auto_visible and args.no_auto_visible:
-            self.cli.parser.error("--auto-visible and --no-auto-visible are mutually exclusive")
-
-        if args.auto_visible:
-            auto_visible = True
-        elif args.no_auto_visible:
-            auto_visible = False
-        else:
-            assert False
+        auto_visible = args.auto_visible == "yes"
 
         try:
             change_visibility_req = pb2.namespace_change_visibility_req(
                 subsystem_nqn=args.subsystem,
-                nsid=args.nsid, auto_visible=auto_visible,
+                nsid=args.nsid,
+                auto_visible=auto_visible,
                 force=args.force)
             ret = self.stub.namespace_change_visibility(change_visibility_req)
         except Exception as ex:
@@ -2391,6 +2387,51 @@ class GatewayClient:
             if ret.status == 0:
                 out_func(f"Changing visibility of namespace {args.nsid} in {args.subsystem} "
                          f"to {vis_text}: Successful")
+            else:
+                err_func(f"{ret.error_message}")
+        elif args.format == "json" or args.format == "yaml":
+            ret_str = json_format.MessageToJson(ret, indent=4,
+                                                including_default_value_fields=True,
+                                                preserving_proto_field_name=True)
+            if args.format == "json":
+                out_func(ret_str)
+            elif args.format == "yaml":
+                obj = json.loads(ret_str)
+                out_func(yaml.dump(obj))
+        elif args.format == "python":
+            return ret
+        else:
+            assert False
+
+        return ret.status
+
+    def ns_set_rbd_trash_image(self, args):
+        """Change RBD trash image flag for a namespace."""
+
+        out_func, err_func = self.get_output_functions(args)
+        if args.nsid <= 0:
+            self.cli.parser.error("nsid value must be positive")
+
+        trash_image = args.rbd_trash_image_on_delete == "yes"
+
+        try:
+            set_trash_image_req = pb2.namespace_set_rbd_trash_image_req(
+                subsystem_nqn=args.subsystem,
+                nsid=args.nsid, trash_image=trash_image)
+            ret = self.stub.namespace_set_rbd_trash_image(set_trash_image_req)
+        except Exception as ex:
+            ret = pb2.req_status(status=errno.EINVAL,
+                                 error_message=f"Failure setting namespace RBD trash image:\n{ex}")
+
+        trash_text = "trash on namespace deletion\""
+        if not trash_image:
+            trash_text = "do not " + trash_text
+        trash_text = "\"" + trash_text
+
+        if args.format == "text" or args.format == "plain":
+            if ret.status == 0:
+                out_func(f"Setting RBD trash image flag for namespace {args.nsid} in "
+                         f"{args.subsystem} to {trash_text}: Successful")
             else:
                 err_func(f"{ret.error_message}")
         elif args.format == "json" or args.format == "yaml":
@@ -2454,12 +2495,21 @@ class GatewayClient:
                  help="Make the namespace visible only to specific hosts",
                  action='store_true',
                  required=False),
+        argument("--rbd-trash-image-on-delete",
+                 help="Trash associated RBD image on namespace deletion. "
+                      "Only applies to images created automatically by the gateway",
+                 action='store_true',
+                 required=False),
     ]
     ns_del_args_list = ns_common_args + [
         argument("--nsid",
                  help="Namespace ID",
                  type=int,
                  required=True),
+        argument("--i-am-sure",
+                 help="Confirmation for deleting the namespace associated RBD image",
+                 action='store_true',
+                 required=False),
     ]
     ns_resize_args_list = ns_common_args + [
         argument("--nsid",
@@ -2505,13 +2555,9 @@ class GatewayClient:
                  type=int,
                  required=True),
         argument("--auto-visible",
-                 help="Visible to all hosts",
-                 action='store_true',
-                 required=False),
-        argument("--no-auto-visible",
-                 help="Visible to selected hosts only",
-                 action='store_true',
-                 required=False),
+                 help="Visible to all hosts if yes, otherwise visible to selected hosts only",
+                 choices=["yes", "no"],
+                 required=True),
         argument("--force",
                  help="Change visibility of namespace even if there hosts added "
                       "to it or active connections on the subsystem",
@@ -2544,6 +2590,17 @@ class GatewayClient:
         argument("--nsid", help="Namespace ID", type=int, required=True),
         argument("--host-nqn", "-t", help="Host NQN list", nargs="+", required=True),
     ]
+    ns_set_rbd_trash_image_args_list = ns_common_args + [
+        argument("--nsid",
+                 help="Namespace ID",
+                 type=int,
+                 required=True),
+        argument("--rbd-trash-image-on-delete",
+                 help="When deleting the namespace, trash associated RBD image. "
+                      "Only applies to images created automatically by the gateway",
+                 choices=["yes", "no"],
+                 required=True),
+    ]
     ns_actions = []
     ns_actions.append({"name": "add",
                        "args": ns_add_args_list,
@@ -2575,6 +2632,10 @@ class GatewayClient:
     ns_actions.append({"name": "change_visibility",
                        "args": ns_change_visibility_args_list,
                        "help": "Change visibility for a namespace"})
+    ns_actions.append({"name": "set_rbd_trash_image",
+                       "args": ns_set_rbd_trash_image_args_list,
+                       "help": "Set the RBD trash image on delete flag for a namespace"})
+    ns_choices = get_actions(ns_actions)
     ns_choices = get_actions(ns_actions)
 
     @cli.cmd(ns_actions, ["ns"])
@@ -2600,6 +2661,8 @@ class GatewayClient:
             return self.ns_del_host(args)
         elif args.action == "change_visibility":
             return self.ns_change_visibility(args)
+        elif args.action == "set_rbd_trash_image":
+            return self.ns_set_rbd_trash_image(args)
         if not args.action:
             self.cli.parser.error(f"missing action for namespace command "
                                   f"(choose from {GatewayClient.ns_choices})")

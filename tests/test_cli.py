@@ -28,6 +28,7 @@ image15 = "mytestdevimage15"
 image16 = "mytestdevimage16"
 image17 = "mytestdevimage17"
 image18 = "mytestdevimage18"
+image19 = "mytestdevimage19"
 pool = "rbd"
 subsystem = "nqn.2016-06.io.spdk:cnode1"
 subsystem2 = "nqn.2016-06.io.spdk:cnode2"
@@ -38,6 +39,7 @@ subsystem6 = "nqn.2016-06.io.spdk:cnode6"
 subsystem7 = "nqn.2016-06.io.spdk:cnode7"
 subsystem8 = "nqn.2016-06.io.spdk:cnode8"
 subsystem9 = "nqn.2016-06.io.spdk:cnode9"
+subsystem10 = "nqn.2016-06.io.spdk:cnode10"
 subsystemX = "nqn.2016-06.io.spdk:cnodeX"
 discovery_nqn = "nqn.2014-08.org.nvmexpress.discovery"
 serial = "Ceph00000000000001"
@@ -608,13 +610,13 @@ class TestCreate:
     def test_change_namespace_visibility(self, caplog, gateway):
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
-             "--auto-visible"])
+             "--auto-visible", "yes"])
         assert f"Failure changing visibility for namespace 8 in {subsystem}: " \
                f"Asking to change visibility of namespace to be visible to all hosts while " \
                f"there are already hosts added to it." in caplog.text
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
-             "--auto-visible", "--force"])
+             "--auto-visible", "yes", "--force"])
         assert f'Asking to change visibility of namespace 8 in {subsystem} to be visible to ' \
                f'all hosts while there are already hosts added to it. Will continue as the ' \
                f'"--force" parameter was used but these hosts will be removed ' \
@@ -623,7 +625,7 @@ class TestCreate:
                f'"visible to all hosts": Successful' in caplog.text
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
-             "--auto-visible"])
+             "--auto-visible", "yes"])
         assert f'Changing visibility of namespace 8 in {subsystem} to ' \
                f'"visible to all hosts": Successful' in caplog.text
         assert f"No change to namespace 8 in {subsystem} visibility, nothing to do" in caplog.text
@@ -638,7 +640,7 @@ class TestCreate:
                f"Namespace is visible to all hosts" in caplog.text
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
-             "--no-auto-visible"])
+             "--auto-visible", "no"])
         assert f'Changing visibility of namespace 8 in {subsystem} to ' \
                f'"visible to selected hosts": Successful' in caplog.text
         caplog.clear()
@@ -664,23 +666,34 @@ class TestCreate:
         except SystemExit as sysex:
             rc = int(str(sysex))
             pass
-        assert "Either --auto-visible or --no-auto-visible should be specified" in caplog.text
+        assert "error: the following arguments are required: --auto-visible" in caplog.text
         assert rc == 2
         caplog.clear()
         rc = 0
         try:
             cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
-                 "--auto-visible", "--no-auto-visible"])
+                 "--auto-visible"])
         except SystemExit as sysex:
             rc = int(str(sysex))
             pass
-        assert "--auto-visible and --no-auto-visible are mutually exclusive" in caplog.text
+        assert "error: argument --auto-visible: expected one argument" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "change_visibility", "--subsystem", subsystem, "--nsid", "8",
+                 "--auto-visible", "junk"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: argument --auto-visible: invalid choice: 'junk' " \
+               "(choose from 'yes', 'no')" in caplog.text
         assert rc == 2
         caplog.clear()
         rc = 0
         try:
             cli(["namespace", "change_visibility", "--subsystem", subsystem,
-                 "--nsid", "-8", "--auto-visible"])
+                 "--nsid", "-8", "--auto-visible", "yes"])
         except SystemExit as sysex:
             rc = int(str(sysex))
             pass
@@ -690,7 +703,7 @@ class TestCreate:
         rc = 0
         try:
             cli(["namespace", "change_visibility", "--subsystem", subsystem,
-                 "--nsid", "X8", "--auto-visible"])
+                 "--nsid", "X8", "--auto-visible", "yes"])
         except SystemExit as sysex:
             rc = int(str(sysex))
             pass
@@ -698,12 +711,12 @@ class TestCreate:
         assert rc == 2
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystem,
-             "--nsid", "28", "--auto-visible"])
+             "--nsid", "28", "--auto-visible", "yes"])
         assert f"Failure changing visibility for namespace 28 in {subsystem}: " \
                f"Can't find namespace" in caplog.text
         caplog.clear()
         cli(["namespace", "change_visibility", "--subsystem", subsystemX,
-             "--nsid", "8", "--auto-visible"])
+             "--nsid", "8", "--auto-visible", "yes"])
         assert f"Failure changing visibility for namespace 8 in {subsystemX}: " \
                f"Can't find subsystem" in caplog.text
 
@@ -1267,31 +1280,31 @@ class TestCreate:
         caplog.clear()
         cli(["--format", "json", "namespace", "list"])
         assert '"subsystem_nqn": "*"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem9}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem9}"' in caplog.text
         assert '"nsid": 1' in caplog.text
         assert '"nsid": 2' in caplog.text
         assert '"nsid": 6' in caplog.text
         caplog.clear()
         cli(["--format", "json", "namespace", "list", "--nsid", "1"])
         assert '"subsystem_nqn": "*"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem9}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem9}"' in caplog.text
         assert '"nsid": 1' in caplog.text
         assert '"nsid": 2' not in caplog.text
         caplog.clear()
         cli(["--format", "json", "namespace", "list", "--nsid", "6"])
         assert '"subsystem_nqn": "*"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem9}"' not in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem9}"' not in caplog.text
         assert '"nsid": 6' in caplog.text
         assert '"nsid": 1' not in caplog.text
         assert '"nsid": 2' not in caplog.text
         caplog.clear()
         cli(["--format", "json", "namespace", "list", "--uuid", uuid])
         assert '"subsystem_nqn": "*"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem}"' in caplog.text
-        assert f'"subsystem_nqn": "{subsystem9}"' not in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem}"' in caplog.text
+        assert f'"ns_subsystem_nqn": "{subsystem9}"' not in caplog.text
         assert f'"uuid": "{uuid}"' in caplog.text
 
     def test_namespace_count_updated(self, caplog):
@@ -1691,3 +1704,44 @@ class TestSPDKLOg:
             pass
         assert "error: argument --level/-l: invalid choice: 'JUNK'" in caplog.text
         assert rc == 2
+
+
+class TestDeleteRBDImage:
+    def test_delete_rbd_image(self, caplog, gateway):
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem10, "--no-group-append"])
+        assert f"Adding subsystem {subsystem10}: Successful" in caplog.text
+        caplog.clear()
+        rc = 0
+        try:
+            cli(["namespace", "add", "--subsystem", subsystem10, "--rbd-pool", pool,
+                 "--rbd-image", image19, "--rbd-trash-image-on-delete"])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: Can't trash associated RBD image on delete if it wasn't " \
+               "created automatically by the gateway" in caplog.text
+        assert rc == 2
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem10, "--rbd-pool", pool,
+             "--rbd-image", image19, "--rbd-create-image", "--size", "16MB",
+             "--rbd-trash-image-on-delete"])
+        assert f"Adding namespace 1 to {subsystem10}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem10, "--nsid", "1"])
+        assert f"Failure deleting namespace 1 from {subsystem10}: Confirmation for trashing " \
+               "RBD image is needed"
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem10, "--nsid", "1", "--i-am-sure"])
+        assert f"Deleting namespace 1 from {subsystem10}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem10, "--rbd-pool", pool,
+             "--rbd-image", image19])
+        assert f"Failure adding namespace to {subsystem10}: Failure creating bdev" in caplog.text
+        caplog.clear()
+        cli(["namespace", "add", "--subsystem", subsystem10, "--rbd-pool", pool,
+             "--rbd-image", image19, "--rbd-create-image", "--size", "32MB"])
+        assert f"Adding namespace 1 to {subsystem10}: Successful" in caplog.text
+        caplog.clear()
+        cli(["namespace", "del", "--subsystem", subsystem10, "--nsid", "1"])
+        assert f"Deleting namespace 1 from {subsystem10}: Successful" in caplog.text

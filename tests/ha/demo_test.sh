@@ -212,14 +212,14 @@ function demo_bdevperf_unsecured()
 
     echo "ℹ️  change namespace visibility"
     set +e
-    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible yes
     if [[ $? -eq 0 ]]; then
         echo "Changing namespace visibility with active connections should fail"
         exit 1
     fi
     set -e
 
-    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible --force
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible yes --force
     make exec SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_detach_controller Nvme0"
     set +e
     cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 5 --no-auto-visible
@@ -229,7 +229,7 @@ function demo_bdevperf_unsecured()
     fi
     set -e
 
-    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --no-auto-visible
+    cephnvmf_func namespace change_visibility --subsystem $NQN --nsid 2 --auto-visible no
 
     echo "ℹ️  bdevperf tcp connect ip: $NVMEOF_IP_ADDRESS port: $NVMEOF_IO_PORT nqn: $NQN, after changing visibility"
     devs=`make exec -s SVC=bdevperf OPTS=-T CMD="$rpc -v -s $BDEVPERF_SOCKET bdev_nvme_attach_controller -b Nvme0 -t tcp -a $NVMEOF_IP_ADDRESS -s $NVMEOF_IO_PORT -f ipv4 -n $NQN -q ${NQN}host -l -1 -o 10"`

@@ -53,10 +53,14 @@ MONITOR_POLLING_RATE_SEC = 2     # monitor polls gw each 2 seconds
 
 
 class BdevStatus:
-    def __init__(self, status, error_message, bdev_name=""):
+    def __init__(self, status, error_message, bdev_name="",
+                 rbd_pool=None, rbd_image_name=None, trash_image=False):
         self.status = status
         self.error_message = error_message
         self.bdev_name = bdev_name
+        self.rbd_pool = rbd_pool
+        self.rbd_image_name = rbd_image_name
+        self.trash_image = trash_image
 
 
 class MonitorGroupService(monitor_pb2_grpc.MonitorGroupServicer):
@@ -325,17 +329,21 @@ class SubsystemHostAuth:
 
 
 class NamespaceInfo:
-    def __init__(self, nsid, bdev, uuid, anagrpid, auto_visible):
+    def __init__(self, nsid, bdev, uuid, anagrpid, auto_visible, pool, image, trash_image):
         self.nsid = nsid
         self.bdev = bdev
         self.uuid = uuid
         self.auto_visible = auto_visible
         self.anagrpid = anagrpid
         self.host_list = []
+        self.pool = pool
+        self.image = image
+        self.trash_image = trash_image
 
     def __str__(self):
         return f"nsid: {self.nsid}, bdev: {self.bdev}, uuid: {self.uuid}, " \
                f"auto_visible: {self.auto_visible}, anagrpid: {self.anagrpid}, " \
+               f"pool: {self.pool}, image: {self.image}, trash_image: {self.trash_image}, " \
                f"hosts: {self.host_list}"
 
     def empty(self) -> bool:
@@ -370,7 +378,7 @@ class NamespaceInfo:
 
 
 class NamespacesLocalList:
-    EMPTY_NAMESPACE = NamespaceInfo(None, None, None, 0, False)
+    EMPTY_NAMESPACE = NamespaceInfo(None, None, None, 0, False, None, None, False)
 
     def __init__(self):
         self.namespace_list = defaultdict(dict)
@@ -385,10 +393,12 @@ class NamespacesLocalList:
             else:
                 self.namespace_list.pop(nqn, None)
 
-    def add_namespace(self, nqn, nsid, bdev, uuid, anagrpid, auto_visible):
+    def add_namespace(self, nqn, nsid, bdev, uuid, anagrpid, auto_visible,
+                      pool, image, trash_image):
         if not bdev:
             bdev = GatewayService.find_unique_bdev_name(uuid)
-        self.namespace_list[nqn][nsid] = NamespaceInfo(nsid, bdev, uuid, anagrpid, auto_visible)
+        self.namespace_list[nqn][nsid] = NamespaceInfo(nsid, bdev, uuid, anagrpid,
+                                                       auto_visible, pool, image, trash_image)
 
     def find_namespace(self, nqn, nsid, uuid=None) -> NamespaceInfo:
         if nqn not in self.namespace_list:
@@ -895,7 +905,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self._grpc_function_with_lock, func, request, context)
 
     def create_bdev(self, anagrp: int, name, uuid, rbd_pool_name, rbd_image_name,
-                    block_size, create_image, rbd_image_size, context, peer_msg=""):
+                    block_size, create_image, trash_image, rbd_image_size, context, peer_msg=""):
         """Creates a bdev from an RBD image."""
 
         if create_image:
@@ -903,9 +913,13 @@ class GatewayService(pb2_grpc.GatewayServicer):
         else:
             cr_img_msg = "will not create image if doesn't exist"
 
+        trsh_msg = ""
+        if trash_image:
+            trsh_msg = "will trash the image on namespace delete, "
+
         self.logger.info(f"Received request to create bdev {name} from"
                          f" {rbd_pool_name}/{rbd_image_name} (size {rbd_image_size} bytes)"
-                         f" with block size {block_size}, {cr_img_msg}, "
+                         f" with block size {block_size}, {cr_img_msg}, {trsh_msg}"
                          f"context={context}{peer_msg}")
 
         if block_size == 0:
@@ -913,7 +927,17 @@ class GatewayService(pb2_grpc.GatewayServicer):
                               error_message=f"Failure creating bdev {name}: block size "
                                             f"can't be zero")
 
+        created_rbd_pool = None
+        created_rbd_image_name = None
         if create_image:
+            if not rbd_pool_name:
+                return BdevStatus(status=errno.ENODEV,
+                                  error_message=f"Failure creating bdev {name}: empty RBD"
+                                                f"pool name")
+            if not rbd_image_name:
+                return BdevStatus(status=errno.ENODEV,
+                                  error_message=f"Failure creating bdev {name}: empty RBD"
+                                                f"image name")
             if rbd_image_size <= 0:
                 return BdevStatus(status=errno.EINVAL,
                                   error_message=f"Failure creating bdev {name}: image size "
@@ -933,9 +957,17 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 if rc:
                     self.logger.info(f"Image {rbd_pool_name}/{rbd_image_name} created, size "
                                      f"is {rbd_image_size} bytes")
+                    created_rbd_pool = rbd_pool_name
+                    created_rbd_image_name = rbd_image_name
                 else:
                     self.logger.info(f"Image {rbd_pool_name}/{rbd_image_name} already exists "
                                      f"with size {rbd_image_size} bytes")
+                    if trash_image:
+                        self.logger.warning(f"Notice that as image "
+                                            f"{rbd_pool_name}/{rbd_image_name} was created "
+                                            f"outside the gateway it won't get trashed on "
+                                            f"namespace deletion")
+                        trash_image = False
             except Exception as ex:
                 errcode = 0
                 msg = ""
@@ -980,18 +1012,24 @@ class GatewayService(pb2_grpc.GatewayServicer):
             if resp:
                 status = resp["code"]
                 errmsg = f"Failure creating bdev {name}: {resp['message']}"
+            if trash_image:
+                self.delete_rbd_image(created_rbd_pool, created_rbd_image_name)
             return BdevStatus(status=status, error_message=errmsg)
 
         # Just in case SPDK failed with no exception
         if not bdev_name:
             errmsg = f"Can't create bdev {name}"
             self.logger.error(errmsg)
+            if trash_image:
+                self.delete_rbd_image(created_rbd_pool, created_rbd_image_name)
             return BdevStatus(status=errno.ENODEV, error_message=errmsg)
 
         assert name == bdev_name, f"Created bdev name {bdev_name} differs " \
                                   f"from requested name {name}"
 
-        return BdevStatus(status=0, error_message=os.strerror(0), bdev_name=name)
+        return BdevStatus(status=0, error_message=os.strerror(0), bdev_name=name,
+                          rbd_pool=rbd_pool_name, rbd_image_name=rbd_image_name,
+                          trash_image=trash_image)
 
     def resize_bdev(self, bdev_name, new_size, peer_msg=""):
         """Resizes a bdev."""
@@ -1495,11 +1533,14 @@ class GatewayService(pb2_grpc.GatewayServicer):
         return errmsg, nqn
 
     def create_namespace(self, subsystem_nqn, bdev_name, nsid, anagrpid, uuid,
-                         auto_visible, context):
+                         auto_visible, rbd_pool, rbd_image_name, trash_image, context):
         """Adds a namespace to a subsystem."""
 
         if context:
             assert self.omap_lock.locked(), "OMAP is unlocked when calling create_namespace()"
+
+        assert (rbd_pool and rbd_image_name) or ((not rbd_pool) and (not rbd_image_name)), \
+            "RBD pool and image name should either be both set or both empty"
 
         nsid_msg = ""
         if nsid:
@@ -1513,9 +1554,12 @@ class GatewayService(pb2_grpc.GatewayServicer):
         add_namespace_error_prefix = f"Failure adding namespace{nsid_msg} to {subsystem_nqn}"
 
         peer_msg = self.get_peer_message(context)
+        rbd_msg = ""
+        if rbd_pool and rbd_image_name:
+            rbd_msg = f"RBD image {rbd_pool}/{rbd_image_name}, "
         self.logger.info(f"Received request to add {bdev_name} to {subsystem_nqn} with load "
                          f"balancing group id {anagrpid}{nsid_msg}, auto_visible: {auto_visible}, "
-                         f"context: {context}{peer_msg}")
+                         f"{rbd_msg}context: {context}{peer_msg}")
 
         if subsystem_nqn not in self.subsys_max_ns:
             errmsg = f"{add_namespace_error_prefix}: No such subsystem"
@@ -1585,7 +1629,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
             )
             self.subsystem_nsid_bdev_and_uuid.add_namespace(subsystem_nqn, nsid,
                                                             bdev_name, uuid,
-                                                            anagrpid, auto_visible)
+                                                            anagrpid, auto_visible,
+                                                            rbd_pool, rbd_image_name,
+                                                            trash_image)
             self.logger.debug(f"subsystem_add_ns: {nsid}")
             self.ana_grp_ns_load[anagrpid] += 1
             if anagrpid in self.ana_grp_subs_load:
@@ -1753,6 +1799,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
         if not request.uuid:
             request.uuid = str(uuid.uuid4())
 
+        if request.trash_image and not request.create_image:
+            self.logger.warning = "Can't trash the RBD image on delete if it " \
+                                  "wasn't created by the gateway, will reset the flag"
+            request.trash_image = False
+
         if context:
             if request.anagrpid != 0:
                 grps_list = self.ceph_utils.get_number_created_gateways(self.gateway_pool,
@@ -1813,7 +1864,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
             anagrp = request.anagrpid
             ret_bdev = self.create_bdev(anagrp, bdev_name, request.uuid, request.rbd_pool_name,
                                         request.rbd_image_name, request.block_size, create_image,
-                                        request.size, context, peer_msg)
+                                        request.trash_image, request.size, context, peer_msg)
             if ret_bdev.status != 0:
                 errmsg = f"Failure adding namespace {nsid_msg}to {request.subsystem_nqn}: " \
                          f"{ret_bdev.error_message}"
@@ -1838,7 +1889,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
             ret_ns = self.create_namespace(request.subsystem_nqn, bdev_name,
                                            request.nsid, anagrp, request.uuid,
-                                           not request.no_auto_visible, context)
+                                           not request.no_auto_visible,
+                                           ret_bdev.rbd_pool, ret_bdev.rbd_image_name,
+                                           ret_bdev.trash_image, context)
             if ret_ns.status == 0 and request.nsid and ret_ns.nsid != request.nsid:
                 errmsg = f"Returned ID {ret_ns.nsid} differs from requested one {request.nsid}"
                 self.logger.error(errmsg)
@@ -1859,6 +1912,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 errmsg = f"Failure adding namespace {nsid_msg}to {request.subsystem_nqn}: " \
                          f"{ret_ns.error_message}"
                 self.logger.error(errmsg)
+                if ret_bdev.trash_image:
+                    self.delete_rbd_image(ret_bdev.rbd_pool, ret_bdev.rbd_image_name)
                 return pb2.nsid_status(status=ret_ns.status, error_message=errmsg)
 
             if context:
@@ -1873,6 +1928,12 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     errmsg = f"Error persisting namespace {nsid_msg}on {request.subsystem_nqn}"
                     self.logger.exception(errmsg)
                     errmsg = f"{errmsg}:\n{ex}"
+                    try:
+                        ret_del = self.delete_bdev(bdev_name, peer_msg=peer_msg)
+                    except Exception:
+                        pass
+                    if ret_bdev.trash_image:
+                        self.delete_rbd_image(ret_bdev.rbd_pool, ret_bdev.rbd_image_name)
                     return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         return pb2.nsid_status(status=0, error_message=os.strerror(0), nsid=ret_ns.nsid)
@@ -2003,6 +2064,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                                     uuid=ns_entry["uuid"],
                                                     anagrpid=request.anagrpid,
                                                     create_image=ns_entry["create_image"],
+                                                    trash_image=ns_entry["trash_image"],
                                                     size=int(ns_entry["size"]),
                                                     force=ns_entry["force"],
                                                     no_auto_visible=ns_entry["no_auto_visible"])
@@ -2036,7 +2098,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         return True
 
     def namespace_change_visibility_safe(self, request, context):
-        """Changes a namespace visibility."""
+        """Changes namespace visibility."""
 
         peer_msg = self.get_peer_message(context)
         failure_prefix = f"Failure changing visibility for namespace {request.nsid} " \
@@ -2115,8 +2177,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                             f"{request.subsystem_nqn} visibility, nothing to do")
                         return pb2.req_status(status=0, error_message=os.strerror(0))
                 except Exception:
-                    errmsg = f"{failure_prefix}: Can't find entry for namespace {request.nsid} " \
-                             f"in {request.subsystem_nqn}"
+                    errmsg = f"{failure_prefix}: Can't find entry for namespace"
                     self.logger.error(errmsg)
                     return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
             try:
@@ -2159,6 +2220,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                                     uuid=ns_entry["uuid"],
                                                     anagrpid=ns_entry["anagrpid"],
                                                     create_image=ns_entry["create_image"],
+                                                    trash_image=ns_entry["trash_image"],
                                                     size=int(ns_entry["size"]),
                                                     force=ns_entry["force"],
                                                     no_auto_visible=not request.auto_visible)
@@ -2178,6 +2240,108 @@ class GatewayService(pb2_grpc.GatewayServicer):
     def namespace_change_visibility(self, request, context=None):
         """Changes a namespace visibility."""
         return self.execute_grpc_function(self.namespace_change_visibility_safe, request, context)
+
+    def namespace_set_rbd_trash_image_safe(self, request, context=None):
+        """Changes RBD trash image flag for a namespace."""
+
+        peer_msg = self.get_peer_message(context)
+        failure_prefix = f"Failure setting RBD trash image flag for namespace {request.nsid} " \
+                         f"in {request.subsystem_nqn}"
+        trash_txt = "trash on namespace deletion\""
+        if not request.trash_image:
+            trash_txt = "do not " + trash_txt
+        trash_txt = "\"" + trash_txt
+        self.logger.info(f"Received request to set the RBD trash image flag of namespace "
+                         f"{request.nsid} in {request.subsystem_nqn} to {trash_txt}, "
+                         f"context: {context}{peer_msg}")
+
+        if not request.nsid:
+            errmsg = "Failure setting RBD trash image flag for namespace, missing ID"
+            self.logger.error(errmsg)
+            return pb2.namespace_io_stats_info(status=errno.EINVAL, error_message=errmsg)
+
+        if not request.subsystem_nqn:
+            errmsg = f"Failure setting RBD trash image flag for namespace {request.nsid}, " \
+                     f"missing subsystem NQN"
+            self.logger.error(errmsg)
+            return pb2.namespace_io_stats_info(status=errno.EINVAL, error_message=errmsg)
+
+        find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(
+            request.subsystem_nqn, request.nsid)
+        if find_ret.empty():
+            errmsg = f"{failure_prefix}: Can't find namespace"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        if request.trash_image:
+            if find_ret.trash_image:
+                self.logger.warning(f"Namespace {request.nsid} in {request.subsystem_nqn} already"
+                                    f" has the RBD trash image flag set, nothing to do")
+                return pb2.req_status(status=0, error_message=os.strerror(0))
+        else:
+            if not find_ret.trash_image:
+                self.logger.warning(f"Namespace {request.nsid} in {request.subsystem_nqn} already"
+                                    f" has the RBD trash image flag reset, nothing to do")
+                return pb2.req_status(status=0, error_message=os.strerror(0))
+
+        omap_lock = self.omap_lock.get_omap_lock_to_use(context)
+        with omap_lock:
+            ns_entry = None
+            if context:
+                # notice that the local state might not be up to date in case we're in the middle
+                # of update() but as the context is not None, we are not in an update(), the OMAP
+                # lock made sure that we got here with an updated local state
+                state = self.gateway_state.local.get_state()
+                ns_key = GatewayState.build_namespace_key(request.subsystem_nqn, request.nsid)
+                try:
+                    state_ns = state[ns_key]
+                    ns_entry = json.loads(state_ns)
+                    if ns_entry["trash_image"] == request.trash_image:
+                        self.logger.warning(f"Namespace {request.nsid} in {request.subsystem_nqn} "
+                                            f"already has the RBD trash image flag set to the "
+                                            f"requested value, nothing to do")
+                        # We should have caught this earlier, the local flag is not up to date
+                        find_ret.trash_image = request.trash_image
+                        return pb2.req_status(status=0, error_message=os.strerror(0))
+                except Exception:
+                    errmsg = f"{failure_prefix}: Can't find entry for namespace"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
+
+                assert ns_entry, "Namespace entry is None"
+                # Update gateway state
+                try:
+                    add_req = pb2.namespace_add_req(rbd_pool_name=ns_entry["rbd_pool_name"],
+                                                    rbd_image_name=ns_entry["rbd_image_name"],
+                                                    subsystem_nqn=ns_entry["subsystem_nqn"],
+                                                    nsid=ns_entry["nsid"],
+                                                    block_size=ns_entry["block_size"],
+                                                    uuid=ns_entry["uuid"],
+                                                    anagrpid=ns_entry["anagrpid"],
+                                                    create_image=ns_entry["create_image"],
+                                                    trash_image=request.trash_image,
+                                                    size=int(ns_entry["size"]),
+                                                    force=ns_entry["force"],
+                                                    no_auto_visible=ns_entry["no_auto_visible"])
+                    json_req = json_format.MessageToJson(
+                        add_req, preserving_proto_field_name=True,
+                        including_default_value_fields=True)
+                    self.gateway_state.add_namespace(request.subsystem_nqn, request.nsid, json_req)
+                except Exception as ex:
+                    errmsg = f"Error persisting change for RBD trash image flag of namespace " \
+                             f"{request.nsid} in {request.subsystem_nqn}"
+                    self.logger.exception(errmsg)
+                    errmsg = f"{errmsg}:\n{ex}"
+                    return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
+            # this should be done also on update
+            find_ret.trash_image = request.trash_image
+
+        return pb2.req_status(status=0, error_message=os.strerror(0))
+
+    def namespace_set_rbd_trash_image(self, request, context=None):
+        """Changes RBD trash image flag for a namespace."""
+        return self.execute_grpc_function(self.namespace_set_rbd_trash_image_safe, request, context)
 
     def remove_namespace_from_state(self, nqn, nsid, context):
         if not context:
@@ -2349,13 +2513,15 @@ class GatewayService(pb2_grpc.GatewayServicer):
                         self.logger.warning(f"Can't find info of namesapce {nsid} in "
                                             f"{subsys_nqn}. Visibility status "
                                             f"will be inaccurate")
+
                     one_ns = pb2.namespace_cli(nsid=nsid,
                                                bdev_name=bdev_name,
                                                uuid=n["uuid"],
                                                load_balancing_group=lb_group,
                                                auto_visible=find_ret.auto_visible,
                                                hosts=find_ret.host_list,
-                                               subsystem_nqn=subsys_nqn)
+                                               ns_subsystem_nqn=subsys_nqn,
+                                               trash_image=find_ret.trash_image)
                     with self.rpc_lock:
                         ns_bdev = self.get_bdev_info(bdev_name)
                     if ns_bdev is None:
@@ -2691,6 +2857,20 @@ class GatewayService(pb2_grpc.GatewayServicer):
         """Resize a namespace."""
         return self.execute_grpc_function(self.namespace_resize_safe, request, context)
 
+    def delete_rbd_image(self, pool, image):
+        if (not pool) and (not image):
+            return
+
+        if (not pool) or (not image):
+            self.logger.warning("RBD pool and image name should be both set or unset, "
+                                "will not delete RBD image")
+            return
+
+        if self.ceph_utils.delete_image(pool, image):
+            self.logger.info(f"Deleted RBD image {pool}/{image}")
+        else:
+            self.logger.warning(f"Failed to delete RBD image {pool}/{image}")
+
     def namespace_delete_safe(self, request, context):
         """Delete a namespace."""
 
@@ -2705,8 +2885,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
         peer_msg = self.get_peer_message(context)
+        i_am_sure_msg = "I am sure, " if request.i_am_sure else ""
         self.logger.info(f"Received request to delete namespace {request.nsid} from "
-                         f"{request.subsystem_nqn}, context: {context}{peer_msg}")
+                         f"{request.subsystem_nqn}, {i_am_sure_msg}"
+                         f"context: {context}{peer_msg}")
 
         find_ret = self.subsystem_nsid_bdev_and_uuid.find_namespace(request.subsystem_nqn,
                                                                     request.nsid)
@@ -2714,10 +2896,36 @@ class GatewayService(pb2_grpc.GatewayServicer):
             errmsg = f"Failure deleting namespace {request.nsid}: Can't find namespace"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        if find_ret.trash_image and not request.i_am_sure:
+            errmsg = f"Failure deleting namespace {request.nsid} from " \
+                     f"{request.subsystem_nqn}: Confirmation for trashing " \
+                     f"RBD image is needed.\nIn order to delete the namespace " \
+                     f"either repeat the command using the \"--i-am-sure\" " \
+                     f"parameter,\nor reset the RBD trash image flag using " \
+                     f"the command:\n" \
+                     f"namespace set_rbd_trash_image --subsystem {request.subsystem_nqn} " \
+                     f"--nsid {request.nsid} --rbd-trash-image-on-delete no"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+
         bdev_name = find_ret.bdev
         if not bdev_name:
             self.logger.warning("Can't find namespace's bdev name, will try to "
                                 "delete namespace anyway")
+
+        if find_ret.trash_image:
+            rbd_pool = find_ret.pool
+            rbd_image_name = find_ret.image
+        else:
+            rbd_pool = None
+            rbd_image_name = None
+
+        if (rbd_pool and (not rbd_image_name)) or ((not rbd_pool) and rbd_image_name):
+            self.logger.warning("RBD pool and image name should be both set or unset, "
+                                "will not delete RBD image")
+            rbd_pool = None
+            rbd_image_name = None
 
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
@@ -2733,7 +2941,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     errmsg = f"Failure deleting namespace {request.nsid} from " \
                              f"{request.subsystem_nqn}: {ret_del.error_message}"
                     self.logger.error(errmsg)
+                    if find_ret.trash_image:
+                        self.delete_rbd_image(rbd_pool, rbd_image_name)
                     return pb2.nsid_status(status=ret_del.status, error_message=errmsg)
+            if find_ret.trash_image:
+                self.delete_rbd_image(rbd_pool, rbd_image_name)
 
         return pb2.req_status(status=0, error_message=os.strerror(0))
 
