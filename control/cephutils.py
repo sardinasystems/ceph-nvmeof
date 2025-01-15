@@ -82,8 +82,8 @@ class CephUtils:
                     self.rebalance_supported = True
                     self.rebalance_ana_group = data.get("rebalance_ana_group", None)
                     self.num_gws = data.get("num gws", None)
-                    self.logger.info(f"Rebalance ana_group: {self.rebalance_ana_group},\
-                                      num-gws: {self.num_gws} ")
+                    self.logger.info(f"Rebalance ana_group: {self.rebalance_ana_group}, "
+                                     f"num-gws: {self.num_gws}")
                 else:
                     self.rebalance_supported = False
                 pos = conv_str.find("[")
@@ -191,7 +191,29 @@ class CephUtils:
 
         return True
 
-    def get_image_size(self, pool_name, image_name) -> int:
+    def delete_image(self, pool_name, image_name) -> bool:
+        if not pool_name and not image_name:
+            return True
+
+        if not self.pool_exists(pool_name):
+            self.logger.warning(f"Pool {pool_name} doesn't exist, can't delete RBD image")
+            return True
+
+        with rados.Rados(conffile=self.ceph_conf, rados_id=self.rados_id) as cluster:
+            with cluster.open_ioctx(pool_name) as ioctx:
+                rbd_inst = rbd.RBD()
+                try:
+                    rbd_inst.remove(ioctx, image_name)
+                except rbd.ImageNotFound:
+                    self.logger.warning(f"Image {pool_name}/{image_name} is not found")
+                    return True
+                except (rbd.ImageBusy, rbd.ImageHasSnapshots):
+                    self.logger.exception(f"Can't delete image {pool_name}/{image_name}")
+                    return False
+
+        return True
+
+    def get_image_size(self, pool_name: str, image_name: str) -> int:
         image_size = 0
         if not self.pool_exists(pool_name):
             raise rbd.ImageNotFound(f"Pool {pool_name} doesn't exist", errno=errno.ENODEV)
@@ -211,6 +233,16 @@ class CephUtils:
                     raise ex
 
         return image_size
+
+    def does_image_exist(self, pool_name: str, image_name: str) -> bool:
+        try:
+            self.get_image_size(pool_name, image_name)
+            return True
+        except rbd.ImageNotFound:
+            return False
+        except Exception:
+            self.logger.exception("Failure getting image size")
+        return False
 
     def get_rbd_exception_details(self, ex):
         ex_details = (None, None)

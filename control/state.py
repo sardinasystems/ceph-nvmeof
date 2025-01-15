@@ -39,6 +39,7 @@ class GatewayState(ABC):
     NAMESPACE_LB_GROUP_PREFIX = "lbgroup" + OMAP_KEY_DELIMITER
     NAMESPACE_HOST_PREFIX = "ns-host" + OMAP_KEY_DELIMITER
     NAMESPACE_VISIBILITY_PREFIX = "ns-visibility" + OMAP_KEY_DELIMITER
+    NAMESPACE_TRASH_IMAGE_PREFIX = "ns-trash-image" + OMAP_KEY_DELIMITER
 
     def is_key_element_valid(s: str) -> bool:
         if not isinstance(s, str):
@@ -61,6 +62,12 @@ class GatewayState(ABC):
 
     def build_namespace_visibility_key(subsystem_nqn: str, nsid) -> str:
         key = GatewayState.NAMESPACE_VISIBILITY_PREFIX + subsystem_nqn
+        if nsid is not None:
+            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+        return key
+
+    def build_namespace_trash_image_key(subsystem_nqn: str, nsid) -> str:
+        key = GatewayState.NAMESPACE_TRASH_IMAGE_PREFIX + subsystem_nqn
         if nsid is not None:
             key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
         return key
@@ -879,6 +886,37 @@ class GatewayStateHandler:
             return (False, None)
         return (True, not new_req.no_auto_visible)
 
+    def namespace_only_trash_image_changed(self, old_val, new_val):
+        # If only the RBD trash image flag has changed we can use set_rbd_trash_image
+        # request instead of re-adding the namespace
+        old_req = None
+        new_req = None
+        try:
+            old_req = json_format.Parse(old_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
+        except json_format.ParseError:
+            self.logger.exception(f"Got exception parsing {old_val}")
+            return (False, None)
+        try:
+            new_req = json_format.Parse(new_val,
+                                        pb2.namespace_add_req(),
+                                        ignore_unknown_fields=True)
+        except json_format.ParseError:
+            self.logger.exeption(f"Got exception parsing {new_val}")
+            return (False, None)
+        if not old_req or not new_req:
+            self.logger.debug(f"Failed to parse requests, old: {old_val} -> "
+                              f"{old_req}, new: {new_val} -> {new_req}")
+            return (False, None)
+        assert old_req != new_req, f"Something was wrong we shouldn't get identical " \
+                                   f"old and new values ({old_req})"
+        old_req.trash_image = new_req.trash_image
+        if old_req != new_req:
+            # Something besides the trash image flag is different
+            return (False, None)
+        return (True, new_req.trash_image)
+
     def host_only_key_changed(self, old_val, new_val):
         # If only the dhchap key has changed we can use change_key request
         # instead of re-adding the host
@@ -1074,9 +1112,10 @@ class GatewayStateHandler:
                 }
                 grouped_changed = self._group_by_prefix(changed, prefix_list)
 
-                # Handle namespace changes in which only the load balancing group id was changed
+                # Handle some special cases in which we don't need to delete and re-add
                 only_lb_group_changed = []
                 only_visibility_changed = []
+                only_trash_image_changed = []
                 only_host_key_changed = []
                 only_subsystem_key_changed = []
                 ns_prefix = GatewayState.build_namespace_key("nqn", None)
@@ -1102,6 +1141,15 @@ class GatewayStateHandler:
                             self.logger.debug(f"Found {key} where only the visibility has changed. "
                                               f"The new visibility is {new_visibility}")
                             only_visibility_changed.append((key, new_visibility))
+
+                        (should_process,
+                         new_trash_image) = self.namespace_only_trash_image_changed(
+                             local_state_dict[key], omap_state_dict[key])
+                        if should_process:
+                            self.logger.debug(f"Found {key} where only the RBD trash image "
+                                              f"flag has changed. "
+                                              f"The new flag is {new_trash_image}")
+                            only_trash_image_changed.append((key, new_trash_image))
                     elif key.startswith(host_prefix):
                         (should_process,
                          new_dhchap_key) = self.host_only_key_changed(local_state_dict[key],
@@ -1171,6 +1219,31 @@ class GatewayStateHandler:
                             self.logger.exception("Exception formatting change namespace "
                                                   "visibility request")
 
+                for ns_key, new_trash_image in only_trash_image_changed:
+                    ns_nqn = None
+                    ns_nsid = None
+                    try:
+                        changed.pop(ns_key)
+                        (ns_nqn, ns_nsid) = self.break_namespace_key(ns_key)
+                    except Exception:
+                        self.logger.exception(f"Exception removing {ns_key} from {changed}")
+                    if ns_nqn and ns_nsid:
+                        try:
+                            trash_image_key = GatewayState.build_namespace_trash_image_key(ns_nqn,
+                                                                                           ns_nsid)
+                            req = pb2.namespace_set_rbd_trash_image_req(
+                                subsystem_nqn=ns_nqn,
+                                nsid=ns_nsid,
+                                trash_image=new_trash_image)
+                            json_req = json_format.MessageToJson(
+                                req,
+                                preserving_proto_field_name=True,
+                                including_default_value_fields=True)
+                            added[trash_image_key] = json_req
+                        except Exception:
+                            self.logger.exception("Exception formatting set namespace "
+                                                  "RBD trash image request")
+
                 for host_key, new_dhchap_key in only_host_key_changed:
                     subsys_nqn = None
                     host_nqn = None
@@ -1220,7 +1293,8 @@ class GatewayStateHandler:
                                               f"key request:\n{ex}")
 
                 if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or \
-                   len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0:
+                   len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0 or \
+                   len(only_trash_image_changed) > 0:
                     grouped_changed = self._group_by_prefix(changed, prefix_list)
 
                     if len(only_subsystem_key_changed) > 0:
@@ -1229,6 +1303,8 @@ class GatewayStateHandler:
                         prefix_list += [GatewayState.NAMESPACE_LB_GROUP_PREFIX]
                     if len(only_visibility_changed) > 0:
                         prefix_list += [GatewayState.NAMESPACE_VISIBILITY_PREFIX]
+                    if len(only_trash_image_changed) > 0:
+                        prefix_list += [GatewayState.NAMESPACE_TRASH_IMAGE_PREFIX]
                     if len(only_host_key_changed) > 0:
                         prefix_list += [GatewayState.HOST_KEY_PREFIX]
                     grouped_added = self._group_by_prefix(added, prefix_list)

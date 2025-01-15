@@ -63,6 +63,9 @@ service Gateway {
 	// Changes namespace's visibility
 	rpc namespace_change_visibility(namespace_change_visibility_req) returns (req_status) {}
 
+	// Set namespace's RBD trash image flag
+	rpc namespace_set_rbd_trash_image(namespace_set_rbd_trash_image_req) returns (req_status) {}
+
 	// Deletes a namespace
 	rpc namespace_delete(namespace_delete_req) returns (req_status) {}
 
@@ -141,6 +144,7 @@ message namespace_add_req {
 	optional uint64 size = 9;
 	optional bool force = 10;
 	optional bool no_auto_visible = 11;
+	optional bool trash_image = 12;
 }
 
 message namespace_resize_req {
@@ -181,10 +185,17 @@ message namespace_change_visibility_req {
 	optional bool force = 4;
 }
 
+message namespace_set_rbd_trash_image_req {
+	string subsystem_nqn = 1;
+	uint32 nsid = 2;
+	bool trash_image = 3;
+}
+
 message namespace_delete_req {
 	string subsystem_nqn = 1;
 	uint32 nsid = 2;
 	optional string OBSOLETE_uuid = 3;
+	optional bool i_am_sure = 4;
 }
 
 message namespace_add_host_req {
@@ -523,7 +534,8 @@ message namespace_cli {
 	uint64 w_mbytes_per_second = 12;
 	bool auto_visible = 13;
 	repeated string hosts = 14;
-	optional string subsystem_nqn = 15;
+	optional string ns_subsystem_nqn = 15;
+	optional bool trash_image = 16;
 }
 
 message namespaces_info {
