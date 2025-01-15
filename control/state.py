@@ -1058,10 +1058,14 @@ class GatewayStateHandler:
 
                 # Find OMAP additions
                 added_keys = omap_state_keys - local_state_keys
+                self.logger.info(f"Added keys: {added_keys}")
                 added = {key: omap_state_dict[key] for key in added_keys}
                 grouped_added = self._group_by_prefix(added, prefix_list)
                 # Find OMAP changes
                 same_keys = omap_state_keys & local_state_keys
+                for key in same_keys:
+                    self.logger.info(f"same key: {key}, local: {local_state_dict[key]},"
+                                     f"omap: {omap_state_dict[key]}")
                 changed = {
                     key: omap_state_dict[key]
                     for key in same_keys
@@ -1079,14 +1083,16 @@ class GatewayStateHandler:
                 host_prefix = GatewayState.build_host_key("nqn", None)
                 subsystem_prefix = GatewayState.build_subsystem_key("nqn")
                 for key in changed.keys():
+                    self.logger.info(f"Changed key: {key} local-state: {local_state_dict[key]}"
+                                     f" omap-state: {omap_state_dict[key]}")
                     if key.startswith(ns_prefix):
                         (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(
                             local_state_dict[key],
                             omap_state_dict[key])
                         if should_process:
                             assert new_lb_grp_id, "Shouldn't get here with an empty lb group id"
-                            self.logger.debug(f"Found {key} where only the load balancing group id "
-                                              f"has changed. The new group id is {new_lb_grp_id}")
+                            self.logger.info(f"Found {key} where only the load balancing group id "
+                                             f"has changed. The new group id is {new_lb_grp_id}")
                             only_lb_group_changed.append((key, new_lb_grp_id))
 
                         (should_process,
