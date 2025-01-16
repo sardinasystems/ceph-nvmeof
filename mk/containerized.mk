@@ -25,7 +25,7 @@ build: DOCKER_COMPOSE_ENV = DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1
 push: QUAY := $(CONTAINER_REGISTRY)
 push: IMAGES := nvmeof nvmeof-cli
 push: TAG_SUFFIX :=  # e.g. "-aarch64" for multi-arch image push
-push: ## Push nvmeof and nvmeof-cli containers images to quay.io registries
+push: ## Push nvmeof, nvmeof-cli and spdk containers images to quay.io registries
 	@echo "Push images $(IMAGES) to registry $(QUAY)";  \
 	short_version=$(shell echo $(VERSION) | cut -d. -f1-2); \
 	versions="$(VERSION) $${short_version} latest"; \
@@ -36,9 +36,12 @@ push: ## Push nvmeof and nvmeof-cli containers images to quay.io registries
 				echo "Pushing image $(QUAY)/$${image}:$${version}$(TAG_SUFFIX) ...";  \
 				docker tag $(CONTAINER_REGISTRY)/$${image}:$(VERSION)$(TAG_SUFFIX) $(QUAY)/$${image}:$${version}$(TAG_SUFFIX) && \
 				docker push $(QUAY)/$${image}:$${version}$(TAG_SUFFIX); \
-			fi \
-		done \
-	done
+			fi; \
+		done; \
+	done; \
+	@echo "Pushing image \"$(QUAY)/spdk:$(SPDK_VERSION)\" ..."; \
+	docker tag $(CONTAINER_REGISTRY)/spdk:$(SPDK_VERSION) $(QUAY)/spdk:$(SPDK_VERSION) && \
+				docker push $(QUAY)/spdk:$(SPDK_VERSION); 
 
 push-manifest-list: QUAY := $(CONTAINER_REGISTRY)
 push-manifest-list: IMAGES := nvmeof nvmeof-cli
