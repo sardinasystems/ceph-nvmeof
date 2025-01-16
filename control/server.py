@@ -22,6 +22,7 @@ from google.protobuf import json_format
 import spdk.rpc
 import spdk.rpc.client as rpc_client
 import spdk.rpc.nvmf as rpc_nvmf
+import spdk.rpc.iobuf as rpc_iobuf
 
 from .proto import gateway_pb2 as pb2
 from .proto import gateway_pb2_grpc as pb2_grpc
@@ -503,6 +504,10 @@ class GatewayServer:
             "spdk", "tgt_cmd_extra_args", "")
         cmd = [spdk_tgt_path, "-u", "-r", self.spdk_rpc_socket_path]
 
+        iobuf_options = self.config.get_with_default("spdk", "iobuf_options", "")
+        if iobuf_options:
+            cmd += ["--wait-for-rpc"]
+
         # Add extra args from the conf file
         if spdk_tgt_cmd_extra_args:
             cmd += shlex.split(spdk_tgt_cmd_extra_args)
@@ -572,6 +577,10 @@ class GatewayServer:
                 log_level=protocol_log_level,
                 conn_retries=conn_retries,
             )
+
+            # Initialize pool and buffer sizes
+            self._initialize_iobuf_options(iobuf_options)
+
             self.spdk_rpc_ping_client = rpc_client.JSONRPCClient(
                 self.spdk_rpc_socket_path,
                 None,
@@ -683,6 +692,33 @@ class GatewayServer:
         self.logger.info("Discovery service terminated")
 
         self.discovery_pid = None
+
+    def _initialize_iobuf_options(self, options):
+        """Initialize pool and buffer sizes."""
+
+        if not options:
+            return
+
+        args = {}
+        self.logger.debug(f"initialize_iobuf_options: options: {options}")
+
+        try:
+            args.update(json.loads(options))
+        except json.decoder.JSONDecodeError:
+            self.logger.exception(f"Failed to parse spdk iobuf_options ({options})")
+            return
+
+        try:
+            rpc_iobuf.iobuf_set_options(self.spdk_rpc_client, **args)
+        except Exception:
+            self.logger.exception("IObuf set options returned with error")
+            pass
+
+        try:
+            spdk.rpc.framework_start_init(self.spdk_rpc_client)
+        except Exception:
+            self.logger.exception("Framework start init returned with error")
+            pass
 
     def _create_transport(self, trtype):
         """Initializes a transport type."""
