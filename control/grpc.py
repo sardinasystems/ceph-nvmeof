@@ -4036,10 +4036,16 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
 
+        # Adding the listener to the OMAP for future use only makes sense when we're
+        # not in update()
+        if not context:
+            request.verify_host_name = True
+
         peer_msg = self.get_peer_message(context)
         self.logger.info(f"Received request to create {request.host_name}"
                          f" TCP {adrfam} listener for {request.nqn} at"
                          f" {request.traddr}:{request.trsvcid}, secure: {request.secure},"
+                         f" verify host name: {request.verify_host_name},"
                          f" context: {context}{peer_msg}")
 
         traddr = GatewayUtils.unescape_address_if_ipv6(request.traddr, adrfam)
@@ -4071,10 +4077,25 @@ class GatewayService(pb2_grpc.GatewayServicer):
         if request.secure:
             add_listener_args["secure_channel"] = True
 
+        listener_created = False
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
-            try:
-                if request.host_name == self.host_name:
+            if request.verify_host_name and request.host_name != self.host_name:
+                if context:
+                    errmsg = f"{create_listener_error_prefix}: Gateway's host name must " \
+                             f"match current host ({self.host_name})"
+                    self.logger.error(errmsg)
+                    return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+                else:
+                    errmsg = f"Listener not created as gateway's host name " \
+                             f"{self.host_name} differs from requested host " \
+                             f"{request.host_name}"
+                    self.logger.debug(errmsg)
+                    return pb2.req_status(status=0, error_message=errmsg)
+
+            assert (not request.verify_host_name) or request.host_name == self.host_name
+            if request.host_name == self.host_name:
+                try:
                     for secure in [False, True]:
                         lstnr = (adrfam, traddr, request.trsvcid, secure)
                         if lstnr in self.subsystem_listeners[request.nqn]:
@@ -4088,27 +4109,21 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     self.logger.debug(f"create_listener: {ret}")
                     self.subsystem_listeners[request.nqn].add((adrfam, traddr,
                                                                request.trsvcid, request.secure))
-                else:
-                    if context:
-                        errmsg = f"{create_listener_error_prefix}: Gateway's host name must " \
-                                 f"match current host ({self.host_name})"
-                        self.logger.error(errmsg)
-                        return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
-                    else:
-                        errmsg = f"Listener not created as gateway's host name " \
-                                 f"{self.host_name} differs from requested host " \
-                                 f"{request.host_name}"
-                        self.logger.debug(errmsg)
-                        return pb2.req_status(status=0, error_message=errmsg)
-            except Exception as ex:
-                self.logger.exception(create_listener_error_prefix)
-                errmsg = f"{create_listener_error_prefix}:\n{ex}"
-                resp = self.parse_json_exeption(ex)
-                status = errno.EINVAL
-                if resp:
-                    status = resp["code"]
-                    errmsg = f"{create_listener_error_prefix}: {resp['message']}"
-                return pb2.req_status(status=status, error_message=errmsg)
+                    listener_created = True
+                except Exception as ex:
+                    self.logger.exception(create_listener_error_prefix)
+                    errmsg = f"{create_listener_error_prefix}:\n{ex}"
+                    resp = self.parse_json_exeption(ex)
+                    status = errno.EINVAL
+                    if resp:
+                        status = resp["code"]
+                        errmsg = f"{create_listener_error_prefix}: {resp['message']}"
+                    return pb2.req_status(status=status, error_message=errmsg)
+            elif not request.verify_host_name:
+                self.logger.info(f"Gateway's host name \"{self.host_name}\" differs from "
+                                 f"requested one \"{request.host_name}\". Listener will "
+                                 f"be stashed to be used later by the right gateway.")
+                ret = True
 
             # Just in case SPDK failed with no exception
             if not ret:
@@ -4116,56 +4131,58 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 return pb2.req_status(status=errno.EINVAL,
                                       error_message=create_listener_error_prefix)
 
-            try:
-                self.logger.debug(f"create_listener nvmf_subsystem_listener_set_ana_state "
-                                  f"{request=} set inaccessible for all ana groups")
-                _ana_state = "inaccessible"
-                ret = rpc_nvmf.nvmf_subsystem_listener_set_ana_state(
-                    self.spdk_rpc_client,
-                    nqn=request.nqn,
-                    ana_state=_ana_state,
-                    trtype="TCP",
-                    traddr=traddr,
-                    trsvcid=str(request.trsvcid),
-                    adrfam=adrfam)
-                self.logger.debug(f"create_listener "
-                                  f"nvmf_subsystem_listener_set_ana_state response {ret=}")
+            if listener_created:
+                try:
+                    self.logger.debug(f"create_listener nvmf_subsystem_listener_set_ana_state "
+                                      f"{request=} set inaccessible for all ana groups")
+                    _ana_state = "inaccessible"
+                    ret = rpc_nvmf.nvmf_subsystem_listener_set_ana_state(
+                        self.spdk_rpc_client,
+                        nqn=request.nqn,
+                        ana_state=_ana_state,
+                        trtype="TCP",
+                        traddr=traddr,
+                        trsvcid=str(request.trsvcid),
+                        adrfam=adrfam)
+                    self.logger.debug(f"create_listener "
+                                      f"nvmf_subsystem_listener_set_ana_state response {ret=}")
 
-                # have been provided with ana state for this nqn prior to creation
-                # update optimized ana groups
-                if self.ana_map[request.nqn]:
-                    for x in range(self.subsys_max_ns[request.nqn]):
-                        ana_grp = x + 1
-                        if ana_grp in self.ana_map[request.nqn]:
-                            if self.ana_map[request.nqn][ana_grp] == pb2.ana_state.OPTIMIZED:
-                                _ana_state = "optimized"
-                                self.logger.debug(f"using ana_map: set listener on nqn: "
-                                                  f"{request.nqn} "
-                                                  f"ana state: {_ana_state} for group: {ana_grp}")
-                                ret = rpc_nvmf.nvmf_subsystem_listener_set_ana_state(
-                                    self.spdk_rpc_client,
-                                    nqn=request.nqn,
-                                    ana_state=_ana_state,
-                                    trtype="TCP",
-                                    traddr=traddr,
-                                    trsvcid=str(request.trsvcid),
-                                    adrfam=adrfam,
-                                    anagrpid=ana_grp)
-                                self.logger.debug(f"create_listener "
-                                                  f"nvmf_subsystem_listener_set_ana_state "
-                                                  f"response {ret=}")
+                    # have been provided with ana state for this nqn prior to creation
+                    # update optimized ana groups
+                    if self.ana_map[request.nqn]:
+                        for x in range(self.subsys_max_ns[request.nqn]):
+                            ana_grp = x + 1
+                            if ana_grp in self.ana_map[request.nqn]:
+                                if self.ana_map[request.nqn][ana_grp] == pb2.ana_state.OPTIMIZED:
+                                    _ana_state = "optimized"
+                                    self.logger.debug(f"using ana_map: set listener on nqn: "
+                                                      f"{request.nqn} "
+                                                      f"ana state: {_ana_state} for "
+                                                      f"group: {ana_grp}")
+                                    ret = rpc_nvmf.nvmf_subsystem_listener_set_ana_state(
+                                        self.spdk_rpc_client,
+                                        nqn=request.nqn,
+                                        ana_state=_ana_state,
+                                        trtype="TCP",
+                                        traddr=traddr,
+                                        trsvcid=str(request.trsvcid),
+                                        adrfam=adrfam,
+                                        anagrpid=ana_grp)
+                                    self.logger.debug(f"create_listener "
+                                                      f"nvmf_subsystem_listener_set_ana_state "
+                                                      f"response {ret=}")
 
-            except Exception as ex:
-                errmsg = f"{create_listener_error_prefix}: Error setting ANA state"
-                self.logger.exception(errmsg)
-                errmsg = f"{errmsg}:\n{ex}"
-                resp = self.parse_json_exeption(ex)
-                status = errno.EINVAL
-                if resp:
-                    status = resp["code"]
-                    errmsg = f"{create_listener_error_prefix}: Error setting ANA state: " \
-                             f"{resp['message']}"
-                return pb2.req_status(status=status, error_message=errmsg)
+                except Exception as ex:
+                    errmsg = f"{create_listener_error_prefix}: Error setting ANA state"
+                    self.logger.exception(errmsg)
+                    errmsg = f"{errmsg}:\n{ex}"
+                    resp = self.parse_json_exeption(ex)
+                    status = errno.EINVAL
+                    if resp:
+                        status = resp["code"]
+                        errmsg = f"{create_listener_error_prefix}: Error setting ANA state: " \
+                                 f"{resp['message']}"
+                    return pb2.req_status(status=status, error_message=errmsg)
 
             if context:
                 # Update gateway state
@@ -4183,7 +4200,12 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     errmsg = f"{errmsg}:\n{ex}"
                     return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
-        return pb2.req_status(status=0, error_message=os.strerror(0))
+        if listener_created:
+            return pb2.req_status(status=0, error_message=os.strerror(0))
+        else:
+            return pb2.req_status(status=errno.EREMOTE,
+                                  error_message="Host name mismatch, listener will only be "
+                                                "active when the appropriate gateway is up")
 
     def create_listener(self, request, context=None):
         return self.execute_grpc_function(self.create_listener_safe, request, context)
