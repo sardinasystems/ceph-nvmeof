@@ -213,7 +213,7 @@ class GatewayClient:
 
     def connect(self, args, host, port, client_key, client_cert, server_cert):
         """Connects to server and sets stub."""
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.format == "json" or args.format == "yaml" or args.format == "python":
             out_func = None
 
@@ -267,9 +267,9 @@ class GatewayClient:
 
     def get_output_functions(self, args):
         if args.output == "log":
-            return (self.logger.info, self.logger.error)
+            return (self.logger.info, self.logger.error, self.logger.warning)
         elif args.output == "stdio":
-            return (print, errprint)
+            return (print, errprint, errprint)
         else:
             self.cli.parser.error("invalid --output value")
 
@@ -277,7 +277,7 @@ class GatewayClient:
     def version(self, args):
         """Get CLI version"""
         rc = 0
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         errmsg = ""
         ver = os.getenv("NVMEOF_VERSION")
         if not ver:
@@ -345,7 +345,7 @@ class GatewayClient:
     def gw_info(self, args):
         """Get gateway's information"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         try:
             gw_info = self.gw_get_info()
         except Exception as ex:
@@ -405,7 +405,7 @@ class GatewayClient:
     def gw_version(self, args):
         """Get gateway's version"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         try:
             gw_info = self.gw_get_info()
         except Exception as ex:
@@ -442,7 +442,7 @@ class GatewayClient:
     def gw_get_log_level(self, args):
         """Get gateway's log level"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         req = pb2.get_gateway_log_level_req()
         try:
             ret = self.stub.get_gateway_log_level(req)
@@ -475,7 +475,7 @@ class GatewayClient:
     def gw_set_log_level(self, args):
         """Set gateway's log level"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         log_level = None
 
         if args.level:
@@ -514,7 +514,7 @@ class GatewayClient:
     def gw_listener_info(self, args):
         """Show gateway's listeners info"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         listeners_info = None
         try:
             list_req = pb2.show_gateway_listeners_info_req(subsystem_nqn=args.subsystem)
@@ -632,7 +632,7 @@ class GatewayClient:
     def spdk_log_level_disable(self, args):
         """Disable SPDK nvmf log flags"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         req = pb2.disable_spdk_nvmf_logs_req()
         try:
@@ -665,7 +665,7 @@ class GatewayClient:
     def spdk_log_level_get(self, args):
         """Get SPDK log levels and nvmf log flags"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         req = pb2.get_spdk_nvmf_log_flags_and_level_req()
         try:
@@ -705,7 +705,7 @@ class GatewayClient:
     def spdk_log_level_set(self, args):
         """Set SPDK log levels and nvmf log flags"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         log_level = None
         print_level = None
 
@@ -784,7 +784,7 @@ class GatewayClient:
     def subsystem_add(self, args):
         """Create a subsystem"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.max_namespaces is not None and args.max_namespaces <= 0:
             self.cli.parser.error("--max-namespaces value must be positive")
         if args.subsystem == GatewayUtils.DISCOVERY_NQN:
@@ -839,7 +839,7 @@ class GatewayClient:
     def subsystem_del(self, args):
         """Delete a subsystem"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.subsystem == GatewayUtils.DISCOVERY_NQN:
             self.cli.parser.error("Can't delete a discovery subsystem")
 
@@ -875,7 +875,7 @@ class GatewayClient:
     def subsystem_list(self, args):
         """List subsystems"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         subsystems = None
         try:
@@ -961,7 +961,7 @@ class GatewayClient:
     def subsystem_change_key(self, args):
         """Change subsystem's inband authentication key."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         if args.dhchap_key == "":
             self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
@@ -1080,7 +1080,7 @@ class GatewayClient:
     def listener_add(self, args):
         """Create a listener"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, wrn_func = self.get_output_functions(args)
 
         if args.trsvcid is None:
             args.trsvcid = 4420
@@ -1103,6 +1103,7 @@ class GatewayClient:
             traddr=traddr,
             trsvcid=args.trsvcid,
             secure=args.secure,
+            verify_host_name=args.verify_host_name
         )
 
         try:
@@ -1112,9 +1113,16 @@ class GatewayClient:
                                  error_message=f"Failure adding {args.subsystem} listener at "
                                                f"{traddr}:{args.trsvcid}:\n{ex}")
 
+        orig_status = ret.status
+        if ret.status == errno.EREMOTE:
+            ret.status = 0
+
         if args.format == "text" or args.format == "plain":
-            if ret.status == 0:
+            if orig_status == 0:
                 out_func(f"Adding {args.subsystem} listener at {traddr}:{args.trsvcid}: Successful")
+            elif orig_status == errno.EREMOTE:
+                wrn_func(f"Adding {args.subsystem} listener at {traddr}:{args.trsvcid}: "
+                         f"listener will only be active when appropriate gateway is up")
             else:
                 err_func(f"{ret.error_message}")
         elif args.format == "json" or args.format == "yaml":
@@ -1136,7 +1144,7 @@ class GatewayClient:
     def listener_del(self, args):
         """Delete a listener"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.trsvcid <= 0:
             self.cli.parser.error("trsvcid value must be positive")
         elif args.trsvcid > 0xffff:
@@ -1196,7 +1204,7 @@ class GatewayClient:
     def listener_list(self, args):
         """List listeners"""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         listeners_info = None
         try:
             list_req = pb2.list_listeners_req(subsystem=args.subsystem)
@@ -1262,6 +1270,11 @@ class GatewayClient:
                  "-t",
                  help="Host name",
                  required=True),
+        argument("--verify-host-name",
+                 "-y",
+                 help="Fail in case the listener's host name is different than the gateway's",
+                 action='store_true',
+                 required=False),
         argument("--traddr",
                  "-a",
                  help="NVMe host IP",
@@ -1332,7 +1345,7 @@ class GatewayClient:
 
         rc = 0
         ret_list = []
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         if args.psk == "":
             self.cli.parser.error("PSK key can't be empty")
@@ -1402,7 +1415,7 @@ class GatewayClient:
 
         rc = 0
         ret_list = []
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         for one_host_nqn in args.host_nqn:
             req = pb2.remove_host_req(subsystem_nqn=args.subsystem, host_nqn=one_host_nqn)
 
@@ -1449,7 +1462,7 @@ class GatewayClient:
     def host_change_key(self, args):
         """Change host's inband authentication keys."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         if args.dhchap_key == "":
             self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
@@ -1490,7 +1503,7 @@ class GatewayClient:
     def host_list(self, args):
         """List a host for a subsystem."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         hosts_info = None
         try:
@@ -1610,7 +1623,7 @@ class GatewayClient:
     def connection_list(self, args):
         """List connections for a subsystem."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         connections_info = None
         try:
             list_req = pb2.list_connections_req(subsystem=args.subsystem)
@@ -1701,7 +1714,7 @@ class GatewayClient:
         """Adds a namespace to a subsystem."""
 
         img_size = 0
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.block_size is None:
             args.block_size = 512
         if args.block_size <= 0:
@@ -1775,7 +1788,7 @@ class GatewayClient:
     def ns_del(self, args):
         """Deletes a namespace from a subsystem."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
@@ -1811,7 +1824,7 @@ class GatewayClient:
         """Resizes a namespace."""
 
         ns_size = 0
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
         ns_size = self.get_size_in_bytes(args.size)
@@ -1899,7 +1912,7 @@ class GatewayClient:
     def ns_list(self, args):
         """Lists namespaces on a subsystem."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid is not None and args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
@@ -2048,7 +2061,7 @@ class GatewayClient:
     def ns_get_io_stats(self, args):
         """Get namespace IO statistics."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
@@ -2159,7 +2172,7 @@ class GatewayClient:
     def ns_change_load_balancing_group(self, args):
         """Change namespace load balancing group."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
         if args.load_balancing_group <= 0:
@@ -2207,7 +2220,7 @@ class GatewayClient:
     def ns_set_qos(self, args):
         """Set namespace QOS limits."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
         if args.rw_ios_per_second is None:
@@ -2268,7 +2281,7 @@ class GatewayClient:
 
         rc = 0
         ret_list = []
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
@@ -2316,7 +2329,7 @@ class GatewayClient:
 
         rc = 0
         ret_list = []
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
@@ -2362,7 +2375,7 @@ class GatewayClient:
     def ns_change_visibility(self, args):
         """Change namespace visibility."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
@@ -2408,7 +2421,7 @@ class GatewayClient:
     def ns_set_rbd_trash_image(self, args):
         """Change RBD trash image flag for a namespace."""
 
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
         if args.nsid <= 0:
             self.cli.parser.error("nsid value must be positive")
 
@@ -2670,7 +2683,7 @@ class GatewayClient:
     @cli.cmd()
     def get_subsystems(self, args):
         """Get subsystems"""
-        out_func, err_func = self.get_output_functions(args)
+        out_func, err_func, _ = self.get_output_functions(args)
 
         subsystems = self.stub.get_subsystems(pb2.get_subsystems_req())
         if args.format == "python":
