@@ -98,18 +98,24 @@ The following command executes all the steps required to set up the NVMe-oF envi
 
 ```bash
 $ make demo
-docker compose  exec  ceph bash -c "rbd -p rbd info demo_image || rbd -p rbd create demo_image --size 10M"
-rbd: error opening image demo_image: (2) No such file or directory
-docker compose  run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 subsystem add --subsystem "nqn.2016-06.io.spdk:cnode1"
+Attempt (1): Fetching URL for arch=x86_64, branch=main, sha=latest...
+Success: Retrieved URL for arch=x86_64, branch=main, sha=latest: https://4.chacra.ceph.com/r/ceph/main/97c8c56a3d2cc7a294b0d2931f856324b5330b7c/centos/9/flavors/default/
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 subsystem add --subsystem "nqn.2016-06.io.spdk:cnode1" --no-group-append
 Adding subsystem nqn.2016-06.io.spdk:cnode1: Successful
-docker compose  run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 namespace add --subsystem "nqn.2016-06.io.spdk:cnode1" --rbd-pool rbd --rbd-image demo_image
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 namespace add --subsystem "nqn.2016-06.io.spdk:cnode1" --rbd-pool rbd --rbd-image demo_image --size 10MB --rbd-create-image
 Adding namespace 1 to nqn.2016-06.io.spdk:cnode1: Successful
-docker compose  run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 listener add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-name fbca1a3d3ed8 --traddr 192.168.13.3 --trsvcid 4420
-Adding listener 192.168.13.3:4420 to nqn.2016-06.io.spdk:cnode1: Successful
-docker compose  run --rm nvmeof-cli --server-address 2001:db8::3 --server-port 5500 listener add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-name fbca1a3d3ed8 --traddr 2001:db8::3 --trsvcid 4420 --adrfam IPV6
-Adding listener [2001:db8::3]:4420 to nqn.2016-06.io.spdk:cnode1: Successful
-docker compose  run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 host add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-nqn "*"
-Allowing any host for nqn.2016-06.io.spdk:cnode1: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 namespace add --subsystem "nqn.2016-06.io.spdk:cnode1" --rbd-pool rbd --rbd-image demo_image2 --size 10MB --rbd-create-image --no-auto-visible
+Adding namespace 2 to nqn.2016-06.io.spdk:cnode1: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 listener add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-name ` /usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr 192.168.13.3 --trsvcid 4420 --verify-host-name
+Adding nqn.2016-06.io.spdk:cnode1 listener at 192.168.13.3:4420: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 listener add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-name ` /usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr 0.0.0.0 --trsvcid `expr 4420 + 1` --verify-host-name
+Adding nqn.2016-06.io.spdk:cnode1 listener at 0.0.0.0:4421: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 2001:db8::3 --server-port 5500 listener add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-name ` /usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr 2001:db8::3 --trsvcid 4420 --adrfam IPV6 --verify-host-name
+Adding nqn.2016-06.io.spdk:cnode1 listener at [2001:db8::3]:4420: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 host add --subsystem "nqn.2016-06.io.spdk:cnode1" --host-nqn "*"
+Allowing open host access to nqn.2016-06.io.spdk:cnode1: Successful
+/usr/bin/docker compose run --rm nvmeof-cli --server-address 192.168.13.3 --server-port 5500 namespace add_host --subsystem "nqn.2016-06.io.spdk:cnode1" --nsid 2 --host-nqn `cat /etc/nvme/hostnqn`
+Adding host nqn.2014-08.org.nvmexpress:uuid:893a6752-fe9b-ca48-aa93-e4565f32881c to namespace 2 on nqn.2016-06.io.spdk:cnode1: Successful
 ```
 
 #### Manual Steps
@@ -122,28 +128,28 @@ The same configuration can also be manually run:
     eval $(make alias)
     ```
 
-1.  In order to start working with the NVMe-oF gateway, we need to create an RBD image first (`demo_image` in the `rbd` pool):
-
-    ```bash
-    make rbd
-    ```
-
 1. Create a subsystem:
 
     ```bash
-    cephnvmf subsystem add --subsystem nqn.2016-06.io.spdk:cnode1
+    cephnvmf subsystem add --subsystem nqn.2016-06.io.spdk:cnode1 --no-group-append
     ```
 
 1. Add a namespace:
 
     ```bash
-    cephnvmf namespace add --subsystem nqn.2016-06.io.spdk:cnode1 --rbd-pool rbd --rbd-image demo_image
+    cephnvmf namespace add --subsystem nqn.2016-06.io.spdk:cnode1 --rbd-pool rbd --rbd-image demo_image --size 10MB --rbd-create-image
+    ```
+
+1. Find the gateway's host name:
+
+    ```bash
+    cephnvmf --output stdio gw info | grep "Gateway's host name:"
     ```
 
 1. Create a listener so that NVMe initiators can connect to:
 
     ```bash
-    cephnvmf listener add ---subsystem nqn.2016-06.io.spdk:cnode1 --host-name host_name -a gateway_addr -s 4420
+    cephnvmf listener add ---subsystem nqn.2016-06.io.spdk:cnode1 --host-name host_name_found_above -a gateway_addr -s 4420 --verify-host-name
     ```
 
 1. Define which hosts can connect:
@@ -181,7 +187,7 @@ Once the NVMe-oF target is
 1. Ensure that the listener is reachable from the NVMe-oF initiator:
 
     ```bash
-    $ sudo nvme discover -t tcp -a 192.168.13.3 -s 4420
+    $ sudo nvme discover -t tcp -a gateway_addr -s 8009
 
     Discovery Log Number of Records 1, Generation counter 2
     =====Discovery Log Entry 0======
@@ -200,7 +206,7 @@ Once the NVMe-oF target is
 1. Connect to desired subsystem:
 
     ```bash
-    sudo nvme connect -t tcp --traddr 192.168.13.3 -s 4420 -n nqn.2016-06.io.spdk:cnode1
+    sudo nvme connect -t tcp --traddr gateway_addr -s 4420 -n nqn.2016-06.io.spdk:cnode1
     ```
 
 1. List the available NVMe targets:
