@@ -1345,7 +1345,7 @@ class GatewayClient:
 
         rc = 0
         ret_list = []
-        out_func, err_func, _ = self.get_output_functions(args)
+        out_func, err_func, wrn_func = self.get_output_functions(args)
 
         if args.psk == "":
             self.cli.parser.error("PSK key can't be empty")
@@ -1387,6 +1387,8 @@ class GatewayClient:
                 if ret.status == 0:
                     if one_host_nqn == "*":
                         out_func(f"Allowing open host access to {args.subsystem}: Successful")
+                        wrn_func(f"Open host access to subsystem {args.subsystem} "
+                                 f"might be a security breach")
                     else:
                         out_func(f"Adding host {one_host_nqn} to {args.subsystem}: Successful")
                 else:

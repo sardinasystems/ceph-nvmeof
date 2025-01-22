@@ -3311,6 +3311,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.warning(f"A specific host {request.host_nqn} was added to subsystem "
                                 f"{request.subsystem_nqn} in which all hosts are allowed")
 
+        if request.host_nqn == "*":
+            self.logger.warning(f"Subsystem {request.subsystem_nqn} will be opened to be "
+                                f"accessed from any host. This might be a security breach")
+
         if self.verify_nqns:
             rc = GatewayService.is_valid_host_nqn(request.host_nqn)
             if rc.status != 0:
