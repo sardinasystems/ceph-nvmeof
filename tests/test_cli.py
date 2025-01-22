@@ -1137,7 +1137,11 @@ class TestCreate:
         caplog.clear()
         cli(["host", "add", "--subsystem", subsystem, "--host-nqn", host])
         if host == "*":
+            assert f"Subsystem {subsystem} will be opened to be accessed from any " \
+                   f"host. This might be a security breach" in caplog.text
             assert f"Allowing open host access to {subsystem}: Successful" in caplog.text
+            assert f"Open host access to subsystem {subsystem} might be a " \
+                   f"security breach" in caplog.text
         else:
             assert f"Adding host {host} to {subsystem}: Successful" in caplog.text
 
