@@ -8,8 +8,7 @@ set -e
 
 VERSION=$1
 if [ "$2" = "latest" ]; then
-    # CEPH_SHA=$(curl -s https://shaman.ceph.com/api/repos/ceph/main/latest/centos/9/ | jq -r ".[] | select(.archs[] == \"$(uname -m)\" and .status == \"ready\") | .sha1")
-    CEPH_SHA=b5c07ab4f77bffd19c88ef47141176982670de94
+    CEPH_SHA=$(curl -s https://shaman.ceph.com/api/repos/ceph/main/latest/centos/9/ | jq -r ".[] | select(.archs[] == \"$(uname -m)\" and .status == \"ready\") | .sha1")
 else
     CEPH_SHA=$2
 fi
@@ -19,7 +18,7 @@ NIGHTLY=$5
 
 RUNNER_FOLDER='/home/cephnvme/actions-runner-ceph'
 BUSY_FILE='/home/cephnvme/busyServer.txt'
-RUNNER_NIGHTLY_FOLDER='/home/cephnvme/actions-runner-ceph-nightly'
+RUNNER_NIGHTLY_FOLDER='/home/cephnvme/actions-runner-ceph-m7'
 BUSY_NIGHTLY_FILE='/home/cephnvme/busyServerNightly.txt'
 
 check_cluster_busy() {
@@ -85,6 +84,7 @@ if [ "$5" != "nightly" ]; then
         --failover-num-after-upgrade=2 \
         --rbd-size=200M \
         --seed=0 \
+        --vhosts=4 \
         --fio-devices-num=1 \
         --lb-timeout=20 \
         --config-dbg-mon=10 \
@@ -120,10 +120,11 @@ else
         --subsystem-num=118 \
         --ns-num=8 \
         --subsystem-max-ns-num=1024 \
-        --failover-num=10 \
+        --failover-num=6 \
         --failover-num-after-upgrade=2 \
         --rbd-size=200M \
         --seed=0 \
+        --vhosts=4 \
         --fio-devices-num=1 \
         --lb-timeout=20 \
         --config-dbg-mon=10 \
@@ -133,12 +134,11 @@ else
         --mon-leader-stop \
         --mon-client-kill \
         --nvmeof-daemon-remove \
-        --redeploy-gws \
         --github-action-deployment \
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
         --dont-use-hugepages \
-        --concise-output \
+        --skip-lb-group-change-test \
         --ibm-cloud-key=nokey \
         --github-nvmeof-token=nokey \
         --env=m7
