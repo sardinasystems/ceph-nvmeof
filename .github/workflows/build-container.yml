@@ -55,6 +55,7 @@ jobs:
           docker save $QUAY_NVMEOF:$NVMEOF_VERSION > nvmeof.tar
           docker save $QUAY_NVMEOFCLI:$NVMEOF_VERSION > nvmeof-cli.tar
           docker save bdevperf > bdevperf.tar
+          docker save $QUAY_SPDK:$SPDK_VERSION > spdk.tar
 
       - name: Upload bdevperf container image
         uses: actions/upload-artifact@v4
@@ -70,6 +71,13 @@ jobs:
           path: |
             nvmeof.tar
             nvmeof-cli.tar
+
+      - name: Upload spdk container image
+        uses: actions/upload-artifact@v4
+        with:
+          name: container_image_spdk
+          path: |
+            spdk.tar
 
   build-ceph:
     runs-on: ubuntu-latest
@@ -710,10 +718,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download container images
+      - name: Download container images (nvmeof)
         uses: actions/download-artifact@v4
         with:
           pattern: container_images_nvmeof*
+          merge-multiple: true
+
+      - name: Download container image (spdk)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: container_image_spdk
           merge-multiple: true
 
       - name: Load container images
@@ -722,6 +736,7 @@ jobs:
           docker load < nvmeof-cli.tar
           docker load < nvmeof-arm64.tar
           docker load < nvmeof-cli-arm64.tar
+          docker load < spdk.tar
 
       - name: Login to quay.io
         uses: docker/login-action@v2
@@ -730,7 +745,7 @@ jobs:
           username: '${{ vars.CONTAINER_REGISTRY_USERNAME }}'
           password: '${{ secrets.CONTAINER_REGISTRY_PASSWORD }}'
 
-      - name: Publish nvmeof containers when release/tag is created
+      - name: Publish nvmeof containers and spdk when release/tag is created
         run: |
           make push
           make push TAG_SUFFIX="-arm64"
