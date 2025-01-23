@@ -20,10 +20,10 @@ demosecuredhchap:
 	$(NVMEOF_CLI) subsystem add --subsystem $(SUBNQN2) --no-group-append --dhchap-key $(DHCHAPKEY3)
 	$(NVMEOF_CLI) namespace add --subsystem $(SUBNQN1) --rbd-pool $(RBD_POOL) --rbd-image $(RBD_IMAGE_NAME) --size $(RBD_IMAGE_SIZE) --rbd-create-image
 	$(NVMEOF_CLI) namespace add --subsystem $(SUBNQN1) --rbd-pool $(RBD_POOL) --rbd-image $(RBD_IMAGE_NAME)2 --size $(RBD_IMAGE_SIZE) --rbd-create-image --no-auto-visible
-	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT)
-	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN2) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT2)
-	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT3)
-	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT4) --secure
+	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT) --verify-host-name
+	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN2) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT2) --verify-host-name
+	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT3) --verify-host-name
+	$(NVMEOF_CLI) listener add --subsystem $(SUBNQN1) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT4) --secure --verify-host-name
 	$(NVMEOF_CLI) host add --subsystem $(SUBNQN1) --host-nqn $(HOSTNQN) --dhchap-key $(DHCHAPKEY1)
 	$(NVMEOF_CLI) host add --subsystem $(SUBNQN2) --host-nqn $(HOSTNQN2) --dhchap-key $(DHCHAPKEY2)
 	$(NVMEOF_CLI) host add --subsystem $(SUBNQN1) --host-nqn $(HOSTNQN3)

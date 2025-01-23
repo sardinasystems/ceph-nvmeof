@@ -8,7 +8,8 @@ set -e
 
 VERSION=$1
 if [ "$2" = "latest" ]; then
-    CEPH_SHA=$(curl -s https://shaman.ceph.com/api/repos/ceph/main/latest/centos/9/ | jq -r ".[] | select(.archs[] == \"$(uname -m)\" and .status == \"ready\") | .sha1")
+    # CEPH_SHA=$(curl -s https://shaman.ceph.com/api/repos/ceph/main/latest/centos/9/ | jq -r ".[] | select(.archs[] == \"$(uname -m)\" and .status == \"ready\") | .sha1")
+    CEPH_SHA=b5c07ab4f77bffd19c88ef47141176982670de94
 else
     CEPH_SHA=$2
 fi
@@ -16,29 +17,42 @@ ATOM_SHA=$3
 ACTION_URL=$4
 NIGHTLY=$5
 
-RUNNER_FILDER='/home/cephnvme/actions-runner-ceph'
+RUNNER_FOLDER='/home/cephnvme/actions-runner-ceph'
+BUSY_FILE='/home/cephnvme/busyServer.txt'
+RUNNER_NIGHTLY_FOLDER='/home/cephnvme/actions-runner-ceph-nightly'
+BUSY_NIGHTLY_FILE='/home/cephnvme/busyServerNightly.txt'
 
-# Check if cluster is busy with another run
-while true; do
-    if [ -f "/home/cephnvme/busyServer.txt" ]; then
-        echo "The server is busy with another github action job, please wait..."
-        sleep 90
-    else
-        echo "The server is available for use!"
-        echo $ACTION_URL > /home/cephnvme/busyServer.txt
-        chmod +rx /home/cephnvme/busyServer.txt
-        break
-    fi
-done
+check_cluster_busy() {
+    local busy_file=$1
+    local action_url=$2
 
-# Remove previous run data
+    while true; do
+        if [ -f "$busy_file" ]; then
+            echo "The server is busy with another GitHub Action job, please wait..."
+            sleep 90
+        else
+            echo "The server is available for use!"
+            echo "$action_url" > "$busy_file"
+            chmod +rx "$busy_file"
+            break
+        fi
+    done
+}
+
 hostname
-rm -rf $RUNNER_FILDER/ceph-nvmeof-atom
-sudo rm -rf /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m6/*
-sudo ls -lta /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m6
+if [ "$5" != "nightly" ]; then
+    rm -rf $RUNNER_FOLDER/ceph-nvmeof-atom
+    sudo rm -rf /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m6/*
+    sudo ls -lta /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m6
+    cd $RUNNER_FOLDER
+else
+    rm -rf $RUNNER_NIGHTLY_FOLDER/ceph-nvmeof-atom
+    sudo rm -rf /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m7/*
+    sudo ls -lta /root/.ssh/atom_backup/artifact/multiIBMCloudServers_m7
+    cd $RUNNER_NIGHTLY_FOLDER
+fi
 
 # Cloning atom repo
-cd $RUNNER_FILDER
 git clone git@github.ibm.com:NVME-Over-Fiber/ceph-nvmeof-atom.git
 
 # Switch to given SHA
@@ -50,6 +64,7 @@ sudo docker build -t nvmeof_atom:$ATOM_SHA .
 
 set -x
 if [ "$5" != "nightly" ]; then
+    check_cluster_busy "$BUSY_FILE" "$ACTION_URL"
     sudo docker run \
         -v /root/.ssh:/root/.ssh \
         nvmeof_atom:"$ATOM_SHA" \
@@ -81,13 +96,14 @@ if [ "$5" != "nightly" ]; then
         --nvmeof-daemon-remove \
         --redeploy-gws \
         --github-action-deployment \
-        --dont-use-mtls \
+        --mtls \
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
         --ibm-cloud-key=nokey \
         --github-nvmeof-token=nokey \
         --env=m6
 else
+    check_cluster_busy "$BUSY_NIGHTLY_FILE" "$ACTION_URL"
     sudo docker run \
         -v /root/.ssh:/root/.ssh \
         nvmeof_atom:"$ATOM_SHA" \
@@ -119,12 +135,12 @@ else
         --nvmeof-daemon-remove \
         --redeploy-gws \
         --github-action-deployment \
-        --dont-use-mtls \
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
         --dont-use-hugepages \
+        --concise-output \
         --ibm-cloud-key=nokey \
         --github-nvmeof-token=nokey \
-        --env=m6
+        --env=m7
 fi
 set +x

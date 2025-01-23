@@ -11,8 +11,8 @@ demosecurepsk:
 	$(NVMEOF_CLI) subsystem add --subsystem $(NQN) --no-group-append
 	$(NVMEOF_CLI) namespace add --subsystem $(NQN) --rbd-pool $(RBD_POOL) --rbd-image $(RBD_IMAGE_NAME) --size $(RBD_IMAGE_SIZE) --rbd-create-image
 	$(NVMEOF_CLI) namespace add --subsystem $(NQN) --rbd-pool $(RBD_POOL) --rbd-image $(RBD_IMAGE_NAME)2 --size $(RBD_IMAGE_SIZE) --rbd-create-image --no-auto-visible
-	$(NVMEOF_CLI) listener add --subsystem $(NQN) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT) --secure
-	$(NVMEOF_CLI) listener add --subsystem $(NQN) --host-name `docker ps -q -f name=$(NVMEOF_CONTAINER_NAME)` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT2)
+	$(NVMEOF_CLI) listener add --subsystem $(NQN) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT) --secure --verify-host-name
+	$(NVMEOF_CLI) listener add --subsystem $(NQN) --host-name `$(NVMEOF_CLI) --output stdio gw info | grep "Gateway's host name:" | cut -d: -f2 | sed 's/ //g'` --traddr $(NVMEOF_IP_ADDRESS) --trsvcid $(NVMEOF_IO_PORT2) --verify-host-name
 	$(NVMEOF_CLI) host add --subsystem $(NQN) --host-nqn "$(HOSTNQN)" --psk $(PSKKEY1)
 	$(NVMEOF_CLI) host add --subsystem $(NQN) --host-nqn "$(HOSTNQN2)"
 	$(NVMEOF_CLI) host add --subsystem $(NQN) --host-nqn "$(HOSTNQN3)" --psk $(PSKKEY2)

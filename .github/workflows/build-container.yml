@@ -553,7 +553,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: ["sanity", "no_huge", "ns_lb_change", "no_subsystems", "auto_load_balance", "state_transitions", "state_transitions_both_gws", "state_transitions_loop", "state_transitions_rand_loop", "late_registration", "late_registration_loop", "4gws", "4gws_loop", "4gws_create_delete", "4gws_create_delete_loop", "namespaces", "namespaces_loop", "mtls", "notify", "ceph_status", "blocklist", "main_exit", "listener_hostname"]
+        test: ["sanity", "no_huge", "ns_lb_change", "no_subsystems", "auto_load_balance", "state_transitions", "state_transitions_both_gws", "state_transitions_loop", "state_transitions_rand_loop", "late_registration", "late_registration_loop", "4gws", "4gws_loop", "4gws_create_delete", "4gws_create_delete_loop", "namespaces", "namespaces_loop", "mtls", "notify", "ceph_status", "blocklist", "main_exit"]
     runs-on: ubuntu-latest
     env:
       HUGEPAGES: 1024  # 4 spdk instances
@@ -688,14 +688,26 @@ jobs:
           ./tests/atom/clusterBuildTestsRun.sh $NVMEOF_VERSION $CEPH_SHA $ATOM_SHA $ACTION_URL 'nightly'
 
       - name: Atom artifact build
-        if: always()
+        if: always() && github.event_name != 'schedule'
         run: ./tests/atom/cpArtifactAndCleanup.sh
-  
-      - uses: actions/upload-artifact@v4
-        if: always()
+
+      - name: Atom artifact build nightly
+        if: always() && github.event_name == 'schedule'
+        run: ./tests/atom/cpArtifactAndCleanup.sh 'nightly'
+
+      - name: Upload artifact for non-schedule events
+        uses: actions/upload-artifact@v4
+        if: always() && github.event_name != 'schedule'
         with:
           name: atom-artifact
-          path: /home/cephnvme/artifact.tar.gz
+          path: /home/cephnvme/artifact_m6.tar.gz
+
+      - name: Upload artifact for schedule events
+        uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'schedule'
+        with:
+          name: atom-artifact
+          path: /home/cephnvme/artifact_m7.tar.gz
 
   push-images-to-ceph-registry:
     if: github.event_name == 'release'
