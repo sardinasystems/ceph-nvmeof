@@ -5,6 +5,7 @@ from control.cli import main as cli
 from control.cli import main_test as cli_test
 from control.cephutils import CephUtils
 import spdk.rpc.bdev as rpc_bdev
+from spdk.rpc import spdk_get_version
 import grpc
 from control.proto import gateway_pb2 as pb2
 from control.proto import gateway_pb2_grpc as pb2_grpc
@@ -169,7 +170,14 @@ class TestGet:
         cli(["version"])
         assert f"CLI version: {cli_ver}" in caplog.text
         caplog.clear()
-        spdk_ver = os.getenv("NVMEOF_SPDK_VERSION")
+        spdk_ver = None
+        try:
+            spdk_ver = spdk_get_version(gw.spdk_rpc_client)
+            spdk_ver = spdk_ver["version"]
+        except Exception:
+            spdk_ver = None
+        if not spdk_ver:
+            spdk_ver = os.getenv("NVMEOF_SPDK_VERSION")
         gw_info = cli_test(["gw", "info"])
         assert gw_info is not None
         assert gw_info.cli_version == cli_ver

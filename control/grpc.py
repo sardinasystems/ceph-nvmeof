@@ -26,6 +26,7 @@ from base64 import b64decode
 from binascii import Error
 from binascii import crc32
 
+from spdk.rpc import spdk_get_version
 import spdk.rpc.bdev as rpc_bdev
 import spdk.rpc.nvmf as rpc_nvmf
 import spdk.rpc.keyring as rpc_keyring
@@ -600,6 +601,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.host_info = SubsystemHostAuth()
         self.up_and_running = True
         self.rebalance = Rebalance(self)
+        self.spdk_version = None
 
     def get_directories_for_key_file(self, key_type: str,
                                      subsysnqn: str, create_dir: bool = False) -> []:
@@ -4890,7 +4892,18 @@ class GatewayService(pb2_grpc.GatewayServicer):
         peer_msg = self.get_peer_message(context)
         self.logger.info(f"Received request to get gateway's info{peer_msg}")
         gw_version_string = os.getenv("NVMEOF_VERSION")
-        spdk_version_string = os.getenv("NVMEOF_SPDK_VERSION")
+        if not self.spdk_version:
+            try:
+                ret = spdk_get_version(self.spdk_rpc_client)
+                if ret:
+                    self.spdk_version = ret["version"]
+            except Exception:
+                self.logger.exception("Error getting SPDK version")
+                pass
+        if self.spdk_version:
+            spdk_version_string = self.spdk_version
+        else:
+            spdk_version_string = os.getenv("NVMEOF_SPDK_VERSION")
         cli_version_string = request.cli_version
         addr = self.config.get_with_default("gateway", "addr", "")
         port = self.config.get_with_default("gateway", "port", "")
