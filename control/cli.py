@@ -890,6 +890,11 @@ class GatewayClient:
         if args.format == "text" or args.format == "plain":
             if subsystems.status == 0:
                 subsys_list = []
+                created_without_key = False
+                for s in subsystems.subsystems:
+                    if s.created_without_key:
+                        created_without_key = True
+                        break
                 for s in subsystems.subsystems:
                     if args.subsystem and args.subsystem != s.nqn:
                         err_func(f"Failure listing subsystem {args.subsystem}: "
@@ -911,21 +916,21 @@ class GatewayClient:
                                   s.max_namespaces,
                                   allow_any,
                                   has_dhchap]
+                    if created_without_key:
+                        one_subsys.append("Yes" if s.created_without_key else "No")
                     subsys_list.append(one_subsys)
                 if len(subsys_list) > 0:
                     if args.format == "text":
                         table_format = "fancy_grid"
                     else:
                         table_format = "plain"
+                    headers_list = ["Subtype", "NQN", "Serial\nNumber", "Controller IDs",
+                                    "Namespace\nCount", "Max\nNamespaces", "Allow\nAny Host",
+                                    "DHCHAP\nKey"]
+                    if created_without_key:
+                        headers_list.append("Created\nWithout Key")
                     subsys_out = tabulate(subsys_list,
-                                          headers=["Subtype",
-                                                   "NQN",
-                                                   "Serial\nNumber",
-                                                   "Controller IDs",
-                                                   "Namespace\nCount",
-                                                   "Max\nNamespaces",
-                                                   "Allow\nAny Host",
-                                                   "DHCHAP\nKey"],
+                                          headers=headers_list,
                                           tablefmt=table_format)
                     prefix = "Subsystems"
                     if args.subsystem:
@@ -1357,6 +1362,12 @@ class GatewayClient:
             if len(args.host_nqn) > 1:
                 self.cli.parser.error("Can't have more than one host NQN when PSK keys are used")
 
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
+
+        if args.psk == "":
+            self.cli.parser.error("PSK key can't be empty")
+
         if args.dhchap_key:
             if len(args.host_nqn) > 1:
                 self.cli.parser.error("Can't have more than one host NQN when "
@@ -1472,6 +1483,9 @@ class GatewayClient:
         if args.host_nqn == "*":
             self.cli.parser.error("Can't change keys for host NQN '*', please use a real NQN")
 
+        if args.dhchap_key == "":
+            self.cli.parser.error("DH-HMAC-CHAP key can't be empty")
+
         req = pb2.change_host_key_req(subsystem_nqn=args.subsystem, host_nqn=args.host_nqn,
                                       dhchap_key=args.dhchap_key)
         try:
@@ -1522,14 +1536,16 @@ class GatewayClient:
                 for h in hosts_info.hosts:
                     use_psk = "Yes" if h.use_psk else "No"
                     use_dhchap = "Yes" if h.use_dhchap else "No"
-                    hosts_list.append([h.nqn, use_psk, use_dhchap])
+                    one_host = [h.nqn, use_psk, use_dhchap]
+                    hosts_list.append(one_host)
                 if len(hosts_list) > 0:
                     if args.format == "text":
                         table_format = "fancy_grid"
                     else:
                         table_format = "plain"
+                    headers_list = ["Host NQN", "Uses PSK", "Uses DHCHAP"]
                     hosts_out = tabulate(hosts_list,
-                                         headers=["Host NQN", "Uses PSK", "Uses DHCHAP"],
+                                         headers=headers_list,
                                          tablefmt=table_format, stralign="center")
                     out_func(f"Hosts allowed to access {args.subsystem}:\n{hosts_out}")
                 else:

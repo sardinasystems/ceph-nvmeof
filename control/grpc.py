@@ -41,6 +41,7 @@ from .proto import monitor_pb2_grpc
 from .config import GatewayConfig
 from .utils import GatewayEnumUtils
 from .utils import GatewayUtils
+from .utils import GatewayUtilsCrypto
 from .utils import GatewayLogger
 from .state import GatewayState, GatewayStateHandler, OmapLock
 from .cephutils import CephUtils
@@ -79,6 +80,7 @@ class SubsystemHostAuth:
 
     def __init__(self):
         self.subsys_allow_any_hosts = defaultdict(dict)
+        self.subsys_created_without_key = defaultdict(set)
         self.subsys_dhchap_key = defaultdict(dict)
         self.host_dhchap_key = defaultdict(dict)
         self.host_psk_key = defaultdict(dict)
@@ -310,6 +312,15 @@ class SubsystemHostAuth:
 
     def is_any_host_allowed(self, subsys) -> bool:
         return subsys in self.subsys_allow_any_hosts
+
+    def set_subsystem_created_without_key(self, subsys):
+        self.subsys_created_without_key[subsys]
+
+    def reset_subsystem_created_without_key(self, subsys):
+        self.subsys_created_without_key.pop(subsys, None)
+
+    def was_subsystem_created_without_key(self, subsys):
+        return subsys in self.subsys_created_without_key
 
     def add_dhchap_key_to_subsystem(self, subsys, key):
         if key:
@@ -571,6 +582,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
             "max_hosts_per_subsystem",
             GatewayService.MAX_HOSTS_PER_SUBSYS_DEFAULT)
         self.gateway_pool = self.config.get_with_default("ceph", "pool", "")
+        self.enable_key_encryption = self.config.getboolean_with_default(
+            "gateway",
+            "enable_key_encryption",
+            True)
         self.ana_map = defaultdict(dict)
         self.ana_grp_state = {}
         self.ana_grp_ns_load = {}
@@ -598,6 +613,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.subsystem_listeners = defaultdict(set)
         self._init_cluster_context()
         self.subsys_max_ns = {}
+        self.subsys_serial = {}
         self.host_info = SubsystemHostAuth()
         self.up_and_running = True
         self.rebalance = Rebalance(self)
@@ -986,6 +1002,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 return BdevStatus(status=errcode,
                                   error_message=f"Failure creating bdev {name}: {errmsg}")
 
+        cluster_name = None
         try:
             cluster_name = self._get_cluster(anagrp)
             bdev_name = rpc_bdev.bdev_rbd_create(
@@ -1005,7 +1022,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
             self.logger.debug(f"bdev_rbd_create: {bdev_name}, cluster_name {cluster_name}")
         except Exception as ex:
-            self._put_cluster(cluster_name)
+            if cluster_name is not None:
+                self._put_cluster(cluster_name)
             errmsg = f"bdev_rbd_create {name} failed"
             self.logger.exception(errmsg)
             errmsg = f"{errmsg} with:\n{ex}"
@@ -1130,39 +1148,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
         return pb2.req_status(status=0, error_message=os.strerror(0))
 
-    def subsystem_already_exists(self, context, nqn) -> bool:
-        if not context:
-            return False
-        state = self.gateway_state.local.get_state()
-        for key, val in state.items():
-            if not key.startswith(self.gateway_state.local.SUBSYSTEM_PREFIX):
-                continue
-            try:
-                subsys = json.loads(val)
-                subnqn = subsys["subsystem_nqn"]
-                if subnqn == nqn:
-                    return True
-            except Exception:
-                self.logger.exception(f"Got exception while parsing {val}, will continue")
-                continue
-        return False
-
-    def serial_number_already_used(self, context, serial) -> str:
-        if not context:
-            return None
-        state = self.gateway_state.local.get_state()
-        for key, val in state.items():
-            if not key.startswith(self.gateway_state.local.SUBSYSTEM_PREFIX):
-                continue
-            try:
-                subsys = json.loads(val)
-                if serial == subsys["serial_number"]:
-                    return subsys["subsystem_nqn"]
-            except Exception:
-                self.logger.exception(f"Got exception while parsing {val}")
-                continue
-        return None
-
     def get_peer_message(self, context) -> str:
         if not context:
             return ""
@@ -1197,8 +1182,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         self.logger.info(
             f"Received request to create subsystem {request.subsystem_nqn}, enable_ha: "
             f"{request.enable_ha}, max_namespaces: {request.max_namespaces}, no group "
-            f"append: {request.no_group_append}, dhchap_key: {request.dhchap_key}, "
-            f"context: {context}{peer_msg}")
+            f"append: {request.no_group_append}, context: {context}{peer_msg}")
 
         if not request.enable_ha:
             errmsg = f"{create_subsystem_error_prefix}: HA must be enabled for subsystems"
@@ -1260,7 +1244,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                      error_message=errmsg,
                                      nqn=request.subsystem_nqn)
 
-        if self.verify_keys:
+        if context and self.verify_keys:
             if request.dhchap_key:
                 rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
                 if rc[0] != 0:
@@ -1302,16 +1286,20 @@ class GatewayService(pb2_grpc.GatewayServicer):
             errmsg = ""
             try:
                 subsys_using_serial = None
-                subsys_already_exists = self.subsystem_already_exists(context,
-                                                                      request.subsystem_nqn)
+                if request.subsystem_nqn in self.subsys_serial:
+                    subsys_already_exists = True
+                else:
+                    subsys_already_exists = False
                 if subsys_already_exists:
                     errmsg = "Subsystem already exists"
                 else:
-                    subsys_using_serial = self.serial_number_already_used(context,
-                                                                          request.serial_number)
-                    if subsys_using_serial:
-                        errmsg = f"Serial number {request.serial_number} is already " \
-                                 f"used by subsystem {subsys_using_serial}"
+                    subsys_using_serial = None
+                    for subsys, sn in self.subsys_serial.items():
+                        if sn == request.serial_number:
+                            subsys_using_serial = subsys
+                            errmsg = f"Serial number {request.serial_number} is already used " \
+                                     f"by subsystem {subsys}"
+                            break
                 if subsys_already_exists or subsys_using_serial:
                     errmsg = f"{create_subsystem_error_prefix}: {errmsg}"
                     self.logger.error(errmsg)
@@ -1328,11 +1316,32 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     max_cntlid=max_cntlid,
                     ana_reporting=True,
                 )
+                self.logger.debug(f"create_subsystem {request.subsystem_nqn}: {ret}")
                 self.subsys_max_ns[request.subsystem_nqn] = request.max_namespaces
+                self.subsys_serial[request.subsystem_nqn] = request.serial_number
+
+                dhchap_key_for_omap = request.dhchap_key
+                key_encrypted_for_omap = False
+                self.host_info.reset_subsystem_created_without_key(request.subsystem_nqn)
+                if context and self.enable_key_encryption and request.dhchap_key:
+                    if self.gateway_state.crypto:
+                        dhchap_key_for_omap = self.gateway_state.crypto.encrypt_text(
+                            request.dhchap_key)
+                        key_encrypted_for_omap = True
+                    else:
+                        self.logger.warning(f"No encryption key or the wrong key was found but "
+                                            f"we need to encrypt subsystem "
+                                            f"{request.subsystem_nqn} DH-HMAC-CHAP key. "
+                                            f"Any attempt to add host access using a "
+                                            f"DH-HMAC-CHAP key to the subsystem "
+                                            f"would fail")
+                        dhchap_key_for_omap = GatewayUtilsCrypto.INVALID_KEY_VALUE
+                        key_encrypted_for_omap = False
+                        self.host_info.set_subsystem_created_without_key(request.subsystem_nqn)
+
                 if request.dhchap_key:
                     self.host_info.add_dhchap_key_to_subsystem(request.subsystem_nqn,
                                                                request.dhchap_key)
-                self.logger.debug(f"create_subsystem {request.subsystem_nqn}: {ret}")
             except Exception as ex:
                 self.logger.exception(create_subsystem_error_prefix)
                 errmsg = f"{create_subsystem_error_prefix}:\n{ex}"
@@ -1354,6 +1363,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
             if context:
                 # Update gateway state
                 try:
+                    assert not request.key_encrypted, "Encrypted keys can only come from update()"
+                    if self.enable_key_encryption and dhchap_key_for_omap:
+                        request.dhchap_key = dhchap_key_for_omap
+                        request.key_encrypted = key_encrypted_for_omap
                     json_req = json_format.MessageToJson(
                         request, preserving_proto_field_name=True,
                         including_default_value_fields=True)
@@ -1430,6 +1443,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     nqn=request.subsystem_nqn,
                 )
                 self.subsys_max_ns.pop(request.subsystem_nqn)
+                self.subsys_serial.pop(request.subsystem_nqn)
                 if request.subsystem_nqn in self.subsystem_listeners:
                     self.subsystem_listeners.pop(request.subsystem_nqn, None)
                 self.host_info.clean_subsystem(request.subsystem_nqn)
@@ -1563,14 +1577,18 @@ class GatewayService(pb2_grpc.GatewayServicer):
                          f"balancing group id {anagrpid}{nsid_msg}, auto_visible: {auto_visible}, "
                          f"{rbd_msg}context: {context}{peer_msg}")
 
-        if subsystem_nqn not in self.subsys_max_ns:
+        if subsystem_nqn not in self.subsys_serial:
             errmsg = f"{add_namespace_error_prefix}: No such subsystem"
             self.logger.error(errmsg)
             return pb2.nsid_status(status=errno.ENOENT, error_message=errmsg)
 
-        if anagrpid > self.subsys_max_ns[subsystem_nqn]:
+        subsys_max_ns = 0
+        if subsystem_nqn in self.subsys_max_ns:
+            subsys_max_ns = self.subsys_max_ns[subsystem_nqn]
+
+        if anagrpid > subsys_max_ns:
             errmsg = f"{add_namespace_error_prefix}: Group ID {anagrpid} is bigger than " \
-                     f"configured maximum {self.subsys_max_ns[subsystem_nqn]}"
+                     f"configured maximum {subsys_max_ns}"
             self.logger.error(errmsg)
             return pb2.nsid_status(status=errno.EINVAL, error_message=errmsg)
 
@@ -1589,33 +1607,23 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 self.logger.error(errmsg)
                 return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
-        if nsid and nsid > self.subsys_max_ns[subsystem_nqn]:
+        if nsid and nsid > subsys_max_ns:
             errmsg = f"{add_namespace_error_prefix}: Requested ID {nsid} is bigger than " \
-                     f"the maximal one ({self.subsys_max_ns[subsystem_nqn]})"
+                     f"the maximal one ({subsys_max_ns})"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
-        if not nsid:
-            ns_count = self.subsystem_nsid_bdev_and_uuid.get_namespace_count(subsystem_nqn,
-                                                                             None, 0)
-            if ns_count >= self.subsys_max_ns[subsystem_nqn]:
-                errmsg = f"{add_namespace_error_prefix}: Subsystem's maximal number of " \
-                         f"namespaces ({self.subsys_max_ns[subsystem_nqn]}) has " \
-                         f"already been reached"
-                self.logger.error(errmsg)
-                return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
+        ns_count = self.subsystem_nsid_bdev_and_uuid.get_namespace_count(subsystem_nqn, None, 0)
+        if ns_count >= subsys_max_ns:
+            errmsg = f"{add_namespace_error_prefix}: Subsystem's maximal number of " \
+                     f"namespaces ({subsys_max_ns}) has already been reached"
+            self.logger.error(errmsg)
+            return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
         ns_count = self.subsystem_nsid_bdev_and_uuid.get_namespace_count(None, None, 0)
         if ns_count >= self.max_namespaces:
             errmsg = f"{add_namespace_error_prefix}: Maximal number of namespaces " \
                      f"({self.max_namespaces}) has already been reached"
-            self.logger.error(errmsg)
-            return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
-
-        ns_count = self.subsystem_nsid_bdev_and_uuid.get_namespace_count(subsystem_nqn, None, 0)
-        if ns_count >= self.subsys_max_ns[subsystem_nqn]:
-            errmsg = f"{add_namespace_error_prefix}: Maximal number of namespaces per " \
-                     f"subsystem ({self.subsys_max_ns[subsystem_nqn]}) has already been reached"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
@@ -1685,7 +1693,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 self.ana_grp_state[gs.grp_id] = gs.state
 
             # If this is not set the subsystem was not created yet
-            if nqn not in self.subsys_max_ns:
+            if nqn not in self.subsys_serial:
                 continue
 
             self.logger.debug(f"Iterate over {nqn=} {self.subsystem_listeners[nqn]=}")
@@ -3285,7 +3293,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         else:
             self.logger.info(
                 f"Received request to add host {request.host_nqn} to {request.subsystem_nqn}, "
-                f"psk: {request.psk}, dhchap: {request.dhchap_key}, context: {context}{peer_msg}")
+                f"context: {context}{peer_msg}")
 
         all_host_failure_prefix = f"Failure allowing open host access to {request.subsystem_nqn}"
         host_failure_prefix = f"Failure adding host {request.host_nqn} to {request.subsystem_nqn}"
@@ -3349,7 +3357,18 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
-        if self.verify_keys:
+        if not context:
+            if request.dhchap_key == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{host_failure_prefix}: No valid DH-HMAC-CHAP key was found for host"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+            if request.psk == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{host_failure_prefix}: No valid PSK key was found for host"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+        if context and self.verify_keys:
             if request.psk:
                 rc = self.host_info.is_valid_psk(request.psk)
                 if rc[0] != 0:
@@ -3363,12 +3382,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     errmsg = f"{host_failure_prefix}: {rc[1]}"
                     self.logger.error(errmsg)
                     return pb2.req_status(status=rc[0], error_message=errmsg)
-
-        if request.dhchap_key:
-            if not self.host_info.does_subsystem_have_dhchap_key(request.subsystem_nqn):
-                self.logger.warning(f"Host {request.host_nqn} has a DH-HMAC-CHAP key but subsystem "
-                                    f"{request.subsystem_nqn} has no key, a unidirectional "
-                                    f"authentication will be used")
 
         if request.host_nqn == "*":
             secure = False
@@ -3400,19 +3413,52 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 errmsg = f"{host_failure_prefix}: Maximal number of hosts for subsystem " \
                          f"({self.max_hosts_per_subsystem}) has already been reached"
                 self.logger.error(errmsg)
-                return pb2.subsys_status(status=errno.E2BIG, error_message=errmsg,
-                                         nqn=request.subsystem_nqn)
+                return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
+
+        dhchap_key_for_omap = request.dhchap_key
+        key_encrypted_for_omap = request.key_encrypted
+        psk_for_omap = request.psk
+        psk_encrypted_for_omap = request.psk_encrypted
+        if context and self.enable_key_encryption:
+            if request.dhchap_key:
+                if self.gateway_state.crypto:
+                    dhchap_key_for_omap = self.gateway_state.crypto.encrypt_text(request.dhchap_key)
+                    key_encrypted_for_omap = True
+                else:
+                    errmsg = f"{host_failure_prefix}: No encryption key or the wrong key was " \
+                             f"found but we need to encrypt host {request.host_nqn} " \
+                             f"DH-HMAC-CHAP key"
+                    self.logger.error(f"{errmsg}")
+                    return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+            if request.psk:
+                if self.gateway_state.crypto:
+                    psk_for_omap = self.gateway_state.crypto.encrypt_text(request.psk)
+                    psk_encrypted_for_omap = True
+                else:
+                    errmsg = f"{host_failure_prefix}: No encryption key or the wrong key was " \
+                             f"found but we need to encrypt host {request.host_nqn} PSK key"
+                    self.logger.error(f"{errmsg}")
+                    return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
 
         dhchap_ctrlr_key = self.host_info.get_subsystem_dhchap_key(request.subsystem_nqn)
         if dhchap_ctrlr_key:
-            self.logger.info(f"Got DHCHAP key {dhchap_ctrlr_key} for "
-                             f"subsystem {request.subsystem_nqn}")
+            self.logger.info(f"Got DH-HMAC-CHAP key for subsystem {request.subsystem_nqn}")
+        elif request.dhchap_key:
+            self.logger.warning(f"Host {request.host_nqn} has a DH-HMAC-CHAP key but subsystem "
+                                f"{request.subsystem_nqn} has none, a unidirectional "
+                                f"authentication will be used")
 
         if dhchap_ctrlr_key and not request.dhchap_key:
             errmsg = f"{host_failure_prefix}: Host must have a DH-HMAC-CHAP " \
                      f"key if the subsystem has one"
             self.logger.error(errmsg)
-            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+            return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+        if not context:
+            if dhchap_ctrlr_key == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{host_failure_prefix}: No valid DH-HMAC-CHAP key was found for subsystem"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
 
         psk_file = None
         psk_key_name = None
@@ -3521,6 +3567,12 @@ class GatewayService(pb2_grpc.GatewayServicer):
             if context:
                 # Update gateway state
                 try:
+                    assert not request.key_encrypted, "Encrypted keys can only come from update()"
+                    assert not request.psk_encrypted, "Encrypted keys can only come from update()"
+                    request.dhchap_key = dhchap_key_for_omap
+                    request.key_encrypted = key_encrypted_for_omap
+                    request.psk = psk_for_omap
+                    request.psk_encrypted = psk_encrypted_for_omap
                     json_req = json_format.MessageToJson(
                         request, preserving_proto_field_name=True,
                         including_default_value_fields=True)
@@ -3658,15 +3710,20 @@ class GatewayService(pb2_grpc.GatewayServicer):
                          f"on subsystem {request.subsystem_nqn}"
         self.logger.info(
             f"Received request to change inband authentication key for host {request.host_nqn} "
-            f"on subsystem {request.subsystem_nqn}, dhchap: {request.dhchap_key}, "
-            f"context: {context}{peer_msg}")
+            f"on subsystem {request.subsystem_nqn}, context: {context}{peer_msg}")
 
         if request.host_nqn == "*":
             errmsg = f"{failure_prefix}: Host NQN can't be '*'"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
 
-        if self.verify_keys:
+        if not context:
+            if request.dhchap_key == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{failure_prefix}: No valid DH-HMAC-CHAP key was found for host"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+        if context and self.verify_keys:
             if request.dhchap_key:
                 rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
                 if rc[0] != 0:
@@ -3713,19 +3770,60 @@ class GatewayService(pb2_grpc.GatewayServicer):
         if dhchap_ctrlr_key and not request.dhchap_key:
             errmsg = f"{failure_prefix}: Host must have a DH-HMAC-CHAP key if the subsystem has one"
             self.logger.error(errmsg)
-            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
-
-        if request.dhchap_key and not dhchap_ctrlr_key:
-            self.logger.warning(f"Host {request.host_nqn} has a DH-HMAC-CHAP key but "
-                                f"subsystem {request.subsystem_nqn} has no key, "
-                                f"a unidirectional authentication will be used")
+            return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
 
         host_already_exist = self.matching_host_exists(context, request.subsystem_nqn,
                                                        request.host_nqn)
         if not host_already_exist and context:
             errmsg = f"{failure_prefix}: Can't find host on subsystem"
             self.logger.error(errmsg)
-            return pb2.req_status(status=errno.EINVAL, error_message=errmsg)
+            return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
+
+        host_psk = None
+        if context:
+            host_psk = self.host_info.get_host_psk_key(request.subsystem_nqn, request.host_nqn)
+
+        dhchap_key_for_omap = request.dhchap_key
+        key_encrypted_for_omap = False
+        psk_for_omap = host_psk
+        psk_encrypted_for_omap = False
+
+        if context and self.enable_key_encryption:
+            if request.dhchap_key:
+                if self.gateway_state.crypto:
+                    dhchap_key_for_omap = self.gateway_state.crypto.encrypt_text(request.dhchap_key)
+                    key_encrypted_for_omap = True
+                else:
+                    errmsg = f"{failure_prefix}: No encryption key or the wrong key was found " \
+                             f"but we need to encrypt host {request.host_nqn} DH-HMAC-CHAP key"
+                    self.logger.error(f"{errmsg}")
+                    return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+            if host_psk:
+                if self.gateway_state.crypto:
+                    psk_for_omap = self.gateway_state.crypto.encrypt_text(host_psk)
+                    psk_encrypted_for_omap = True
+                else:
+                    errmsg = f"{failure_prefix}: No encryption key or the wrong key was found " \
+                             f"but we need to encrypt host {request.host_nqn} PSK key"
+                    self.logger.error(f"{errmsg}")
+                    return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+        if request.dhchap_key and not dhchap_ctrlr_key:
+            self.logger.warning(f"Host {request.host_nqn} has a DH-HMAC-CHAP key but subsystem "
+                                f"{request.subsystem_nqn} has none, a unidirectional "
+                                f"authentication will be used")
+
+        if not context:
+            if dhchap_ctrlr_key == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{failure_prefix}: No valid DH-HMAC-CHAP key was found for subsystem"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
+
+            if host_psk == GatewayUtilsCrypto.INVALID_KEY_VALUE:
+                errmsg = f"{failure_prefix}: No valid PSK key was found for subsystem"
+                self.logger.error(f"{errmsg}")
+                return pb2.req_status(status=errno.ENOKEY, error_message=errmsg)
 
         dhchap_file = None
         dhchap_key_name = None
@@ -3748,10 +3846,6 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
         omap_lock = self.omap_lock.get_omap_lock_to_use(context)
         with omap_lock:
-            host_psk = None
-            if context:
-                host_psk = self.host_info.get_host_psk_key(request.subsystem_nqn, request.host_nqn)
-
             try:
                 self._add_key_to_keyring("DH-HMAC-CHAP", dhchap_file, dhchap_key_name)
                 self._add_key_to_keyring("DH-HMAC-CHAP controller",
@@ -3793,8 +3887,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 try:
                     add_req = pb2.add_host_req(subsystem_nqn=request.subsystem_nqn,
                                                host_nqn=request.host_nqn,
-                                               psk=host_psk,
-                                               dhchap_key=request.dhchap_key)
+                                               psk=psk_for_omap,
+                                               dhchap_key=dhchap_key_for_omap,
+                                               key_encrypted=key_encrypted_for_omap,
+                                               psk_encrypted=psk_encrypted_for_omap)
                     json_req = json_format.MessageToJson(
                         add_req, preserving_proto_field_name=True,
                         including_default_value_fields=True)
@@ -4567,6 +4663,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     s["namespace_count"] = ns_count
                     s["enable_ha"] = True
                     s["has_dhchap_key"] = self.host_info.does_subsystem_have_dhchap_key(s["nqn"])
+                    s["created_without_key"] = \
+                        self.host_info.was_subsystem_created_without_key(s["nqn"])
                 else:
                     s["namespace_count"] = 0
                     s["enable_ha"] = False
@@ -4633,7 +4731,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         failure_prefix = f"Failure changing DH-HMAC-CHAP key for subsystem {request.subsystem_nqn}"
         self.logger.info(
             f"Received request to change inband authentication key for subsystem "
-            f"{request.subsystem_nqn}, dhchap: {request.dhchap_key}, context: {context}{peer_msg}")
+            f"{request.subsystem_nqn}, context: {context}{peer_msg}")
 
         if not GatewayState.is_key_element_valid(request.subsystem_nqn):
             errmsg = f"{failure_prefix}: Invalid subsystem NQN \"{request.subsystem_nqn}\"," \
@@ -4648,7 +4746,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                 self.logger.error(errmsg)
                 return pb2.req_status(status=rc[0], error_message=errmsg)
 
-        if self.verify_keys:
+        if context and self.verify_keys:
             if request.dhchap_key:
                 rc = self.host_info.is_valid_dhchap_key(request.dhchap_key)
                 if rc[0] != 0:
@@ -4688,17 +4786,37 @@ class GatewayService(pb2_grpc.GatewayServicer):
                     errmsg = f"{failure_prefix}: Can't find entry for subsystem " \
                              f"{request.subsystem_nqn}"
                     self.logger.error(errmsg)
-                    return pb2.req_status(status=errno.ENOENT, error_message=errmsg)
+                    return pb2.req_status(status=errno.ENODEV, error_message=errmsg)
 
                 assert subsys_entry, f"Can't find entry for subsystem {request.subsystem_nqn}"
                 try:
+                    key_encrypted = False
+                    dhchap_key_for_omap = request.dhchap_key
+                    self.host_info.reset_subsystem_created_without_key(request.subsystem_nqn)
+                    if context and self.enable_key_encryption and request.dhchap_key:
+                        if self.gateway_state.crypto:
+                            dhchap_key_for_omap = \
+                                self.gateway_state.crypto.encrypt_text(request.dhchap_key)
+                            key_encrypted = True
+                        else:
+                            self.logger.warning(f"No encryption key or the wrong key was found "
+                                                f"but we need to encrypt subsystem "
+                                                f"{request.subsystem_nqn} "
+                                                f"DH-HMAC-CHAP key. Any attempt to add host "
+                                                f"access using a DH-HMAC-CHAP key to the subsystem "
+                                                f"would fail")
+                            dhchap_key_for_omap = GatewayUtilsCrypto.INVALID_KEY_VALUE
+                            key_encrypted = False
+                            self.host_info.set_subsystem_created_without_key(request.subsystem_nqn)
+
                     create_req = pb2.create_subsystem_req(
                         subsystem_nqn=request.subsystem_nqn,
                         serial_number=subsys_entry["serial_number"],
                         max_namespaces=subsys_entry["max_namespaces"],
                         enable_ha=subsys_entry["enable_ha"],
                         no_group_append=subsys_entry["no_group_append"],
-                        dhchap_key=request.dhchap_key)
+                        dhchap_key=dhchap_key_for_omap,
+                        key_encrypted=key_encrypted)
                     json_req = json_format.MessageToJson(
                         create_req, preserving_proto_field_name=True,
                         including_default_value_fields=True)

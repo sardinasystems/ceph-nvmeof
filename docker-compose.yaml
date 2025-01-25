@@ -69,8 +69,9 @@ services:
       sh -c './vstart.sh --new $$CEPH_VSTART_ARGS &&
       echo ceph dashboard nvmeof-gateway-add -i <(echo nvmeof-devel:5500) nvmeof.1 &&
       pushd /etc/ceph &&
-      openssl req -x509 -newkey rsa:4096 -nodes -keyout server.key -out server.crt -days 3650 -subj /CN=my.server  -addext "subjectAltName = IP:192.168.13.3, IP:0.0.0.0" &&
-      openssl req -x509 -newkey rsa:4096 -nodes -keyout client.key -out client.crt -days 3650 -subj /CN=client1 &&
+      openssl req -x509 -newkey rsa:4096 -noenc -keyout server.key -out server.crt -days 3650 -subj /CN=my.server -addext "subjectAltName = IP:192.168.13.3, IP:0.0.0.0" &&
+      openssl req -x509 -newkey rsa:4096 -noenc -keyout client.key -out client.crt -days 3650 -subj /CN=client1 &&
+      if [[ ! -f /etc/ceph/encryption.key ]]; then openssl req -newkey rsa:512 -noenc -noout -keyout encryption.key -batch 2> /dev/null; fi &&
       popd &&
       ceph osd pool create rbd &&
       sleep infinity'
@@ -80,6 +81,7 @@ services:
         [ -f /etc/ceph/server.key ] &&
         [ -f /etc/ceph/client.crt ] &&
         [ -f /etc/ceph/client.key ] &&
+        [ -f /etc/ceph/encryption.key ] &&
         ceph osd pool stats rbd
       start_period: 6s
       interval: 3s

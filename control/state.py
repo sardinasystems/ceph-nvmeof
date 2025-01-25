@@ -17,6 +17,7 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 from .utils import GatewayLogger
 from .utils import GatewayUtils
+from .utils import GatewayUtilsCrypto
 from google.protobuf import json_format
 from .proto import gateway_pb2 as pb2
 
@@ -714,8 +715,9 @@ class GatewayStateHandler:
         use_notify: Flag to indicate use of OMAP watch/notify
     """
 
-    def __init__(self, config, local, omap, gateway_rpc_caller, id_text=""):
+    def __init__(self, config, local, omap, gateway_rpc_caller, crypto, id_text=""):
         self.config = config
+        self.crypto = crypto
         self.local = local
         self.omap = omap
         self.gateway_rpc_caller = gateway_rpc_caller
@@ -926,16 +928,16 @@ class GatewayStateHandler:
             old_req = json_format.Parse(old_val, pb2.add_host_req(), ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
-            return (False, None)
+            return (False, None, False)
         try:
             new_req = json_format.Parse(new_val, pb2.add_host_req(), ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exeption(f"Got exception parsing {new_val}")
-            return (False, None)
+            return (False, None, False)
         if not old_req or not new_req:
             self.logger.debug(f"Failed to parse requests, old: {old_val} -> "
                               f"{old_req}, new: {new_val} -> {new_req}")
-            return (False, None)
+            return (False, None, False)
         assert old_req != new_req, f"Something was wrong we shouldn't get identical " \
                                    f"old and new values ({old_req})"
         # Because of Json formatting of empty fields we might get a difference here,
@@ -944,11 +946,24 @@ class GatewayStateHandler:
             old_req.dhchap_key = ""
         if not new_req.dhchap_key:
             new_req.dhchap_key = ""
+        if not old_req.key_encrypted:
+            old_req.key_encrypted = False
+        if not new_req.key_encrypted:
+            new_req.key_encrypted = False
+        if not old_req.psk:
+            old_req.psk = ""
+        if not new_req.psk:
+            new_req.psk = ""
+        if not old_req.psk_encrypted:
+            old_req.psk_encrypted = False
+        if not new_req.psk_encrypted:
+            new_req.psk_encrypted = False
         old_req.dhchap_key = new_req.dhchap_key
+        old_req.key_encrypted = new_req.key_encrypted
         if old_req != new_req:
             # Something besides the keys is different
-            return (False, None)
-        return (True, new_req.dhchap_key)
+            return (False, None, False)
+        return (True, new_req.dhchap_key, new_req.key_encrypted)
 
     def subsystem_only_key_changed(self, old_val, new_val):
         # If only the dhchap key field has changed we can use change_key
@@ -961,18 +976,18 @@ class GatewayStateHandler:
                                         ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exception(f"Got exception parsing {old_val}")
-            return (False, None)
+            return (False, None, False)
         try:
             new_req = json_format.Parse(new_val,
                                         pb2.create_subsystem_req(),
                                         ignore_unknown_fields=True)
         except json_format.ParseError:
             self.logger.exeption(f"Got exception parsing {new_val}")
-            return (False, None)
+            return (False, None, False)
         if not old_req or not new_req:
             self.logger.debug(f"Failed to parse requests, old: {old_val} -> {old_req}, "
                               f"new: {new_val} -> {new_req}")
-            return (False, None)
+            return (False, None, False)
         assert old_req != new_req, f"Something was wrong we shouldn't get identical old " \
                                    f"and new values ({old_req})"
         # Because of Json formatting of empty fields we might get a difference here,
@@ -981,11 +996,16 @@ class GatewayStateHandler:
             old_req.dhchap_key = ""
         if not new_req.dhchap_key:
             new_req.dhchap_key = ""
+        if not old_req.key_encrypted:
+            old_req.key_encrypted = False
+        if not new_req.key_encrypted:
+            new_req.key_encrypted = False
         old_req.dhchap_key = new_req.dhchap_key
+        old_req.key_encrypted = new_req.key_encrypted
         if old_req != new_req:
             # Something besides the keys is different
-            return (False, None)
-        return (True, new_req.dhchap_key)
+            return (False, None, False)
+        return (True, new_req.dhchap_key, new_req.key_encrypted)
 
     def break_namespace_key(self, ns_key: str):
         if not ns_key.startswith(GatewayState.NAMESPACE_PREFIX):
@@ -1136,7 +1156,8 @@ class GatewayStateHandler:
 
                         (should_process,
                          new_visibility) = self.namespace_only_visibility_changed(
-                             local_state_dict[key], omap_state_dict[key])
+                            local_state_dict[key],
+                            omap_state_dict[key])
                         if should_process:
                             self.logger.debug(f"Found {key} where only the visibility has changed. "
                                               f"The new visibility is {new_visibility}")
@@ -1144,7 +1165,8 @@ class GatewayStateHandler:
 
                         (should_process,
                          new_trash_image) = self.namespace_only_trash_image_changed(
-                             local_state_dict[key], omap_state_dict[key])
+                            local_state_dict[key],
+                            omap_state_dict[key])
                         if should_process:
                             self.logger.debug(f"Found {key} where only the RBD trash image "
                                               f"flag has changed. "
@@ -1152,22 +1174,26 @@ class GatewayStateHandler:
                             only_trash_image_changed.append((key, new_trash_image))
                     elif key.startswith(host_prefix):
                         (should_process,
-                         new_dhchap_key) = self.host_only_key_changed(local_state_dict[key],
-                                                                      omap_state_dict[key])
+                         new_dhchap_key,
+                         new_key_encrypted) = self.host_only_key_changed(
+                             local_state_dict[key],
+                             omap_state_dict[key])
                         if should_process:
-                            assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
                             self.logger.debug(f"Found {key} where only the key has changed. The "
                                               f"new DHCHAP key is {new_dhchap_key}")
-                            only_host_key_changed.append((key, new_dhchap_key))
+                            only_host_key_changed.append((key, new_dhchap_key, new_key_encrypted))
                     elif key.startswith(subsystem_prefix):
                         (should_process,
-                         new_dhchap_key) = self.subsystem_only_key_changed(local_state_dict[key],
-                                                                           omap_state_dict[key])
+                         new_dhchap_key,
+                         new_key_encrypted) = self.subsystem_only_key_changed(
+                            local_state_dict[key],
+                            omap_state_dict[key])
                         if should_process:
-                            assert new_dhchap_key, "Shouldn't get here with an empty dhchap key"
                             self.logger.debug(f"Found {key} where only the key has changed. The "
                                               f"new DHCHAP key is {new_dhchap_key}")
-                            only_subsystem_key_changed.append((key, new_dhchap_key))
+                            only_subsystem_key_changed.append((key,
+                                                               new_dhchap_key,
+                                                               new_key_encrypted))
 
                 for ns_key, new_lb_grp in only_lb_group_changed:
                     ns_nqn = None
@@ -1244,7 +1270,7 @@ class GatewayStateHandler:
                             self.logger.exception("Exception formatting set namespace "
                                                   "RBD trash image request")
 
-                for host_key, new_dhchap_key in only_host_key_changed:
+                for host_key, new_dhchap_key, new_key_encrypted in only_host_key_changed:
                     subsys_nqn = None
                     host_nqn = None
                     try:
@@ -1259,6 +1285,11 @@ class GatewayStateHandler:
                     if subsys_nqn and host_nqn:
                         try:
                             host_key_key = GatewayState.build_host_key_key(subsys_nqn, host_nqn)
+                            if new_key_encrypted and new_dhchap_key:
+                                if self.crypto:
+                                    new_dhchap_key = self.crypto.decrypt_text(new_dhchap_key)
+                                else:
+                                    new_dhchap_key = GatewayUtilsCrypto.INVALID_KEY_VALUE
                             req = pb2.change_host_key_req(subsystem_nqn=subsys_nqn,
                                                           host_nqn=host_nqn,
                                                           dhchap_key=new_dhchap_key)
@@ -1267,11 +1298,10 @@ class GatewayStateHandler:
                                 preserving_proto_field_name=True,
                                 including_default_value_fields=True)
                             added[host_key_key] = json_req
-                        except Exception as ex:
-                            self.logger.error(f"Exception formatting change host "
-                                              f"key request:\n{ex}")
+                        except Exception:
+                            self.logger.exception("Exception formatting change host key request")
 
-                for subsys_key, new_dhchap_key in only_subsystem_key_changed:
+                for subsys_key, new_dhchap_key, new_key_encrypted in only_subsystem_key_changed:
                     subsys_nqn = None
                     try:
                         changed.pop(subsys_key)
@@ -1281,6 +1311,11 @@ class GatewayStateHandler:
                     if subsys_nqn:
                         try:
                             subsys_key_key = GatewayState.build_subsystem_key_key(subsys_nqn)
+                            if new_key_encrypted and new_dhchap_key:
+                                if self.crypto:
+                                    new_dhchap_key = self.crypto.decrypt_text(new_dhchap_key)
+                                else:
+                                    new_dhchap_key = GatewayUtilsCrypto.INVALID_KEY_VALUE
                             req = pb2.change_subsystem_key_req(subsystem_nqn=subsys_nqn,
                                                                dhchap_key=new_dhchap_key)
                             json_req = json_format.MessageToJson(
@@ -1288,9 +1323,9 @@ class GatewayStateHandler:
                                 preserving_proto_field_name=True,
                                 including_default_value_fields=True)
                             added[subsys_key_key] = json_req
-                        except Exception as ex:
-                            self.logger.error(f"Exception formatting change subsystem "
-                                              f"key request:\n{ex}")
+                        except Exception:
+                            self.logger.exception("Exception formatting change subsystem "
+                                                  "key request")
 
                 if len(only_lb_group_changed) > 0 or len(only_host_key_changed) > 0 or \
                    len(only_subsystem_key_changed) > 0 or len(only_visibility_changed) > 0 or \
