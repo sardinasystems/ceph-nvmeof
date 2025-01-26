@@ -25,13 +25,16 @@ The [creation and management of RBD images](https://docs.ceph.com/en/latest/rbd/
 * `moby-engine` (`docker-engine`) (v20.10) and `docker-compose` (v2.11.0+). These versions are just indicative
 *  `make` (only needed to launch `docker-compose` commands).
 
-To install these dependencies in Fedora:
+##### To install these dependencies in Fedora:
 
 ```bash
 sudo dnf install -y make moby-engine docker-compose-plugin
 ```
 
-Some [post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/) are required to use `docker` with regular users:
+##### To install these dependencies in CentOS:
+ Following [Install Docker Engine on CentOS](https://docs.docker.com/engine/install/centos/#install-using-the-repository).
+
+After installing the docker-engine, several [post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/) are required to use `docker` with regular users:
 
 ```bash
 sudo groupadd docker
