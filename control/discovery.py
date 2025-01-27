@@ -12,6 +12,7 @@ import json
 from .config import GatewayConfig
 from .state import GatewayState, LocalGatewayState, OmapGatewayState, GatewayStateHandler
 from .utils import GatewayLogger
+from .utils import GatewayUtilsCrypto
 
 from typing import Dict
 
@@ -1152,10 +1153,11 @@ class DiscoveryService:
         t.start()
 
         local_state = LocalGatewayState()
+        dummy_crypto = GatewayUtilsCrypto(None)
         gateway_state = GatewayStateHandler(self.config, local_state,
                                             self.omap_state,
                                             self._state_notify_update,
-                                            f"discovery-{socket.gethostname()}")
+                                            dummy_crypto, f"discovery-{socket.gethostname()}")
         gateway_state.start_update()
 
         try:

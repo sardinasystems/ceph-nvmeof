@@ -479,6 +479,40 @@ function demo_bdevperf_psk()
         exit 1
     fi
     set -e
+
+    echo "ℹ️  use invalid encryption key"
+    sed -i '/enable_key_encryption/d' ceph-nvmeof.conf
+    sed -i 's#encryption_key = /etc/ceph/encryption.key#encryption_key = /etc/ceph/XXXencryption.key#' ceph-nvmeof.conf
+    container_id=$(docker ps -q -f name=nvmeof)
+    docker restart ${container_id}
+    sleep 20
+    cephnvmf_func subsystem add --subsystem ${NQN}6 --no-group-append
+    set +e
+        cephnvmf_func host add --subsystem ${NQN}6 --host-nqn ${NQN}host20 --psk "${PSK_KEY1}"
+        if [[ $? -eq 0 ]]; then
+            echo "Add host with PSK key should fail without valid encryption key"
+            exit 1
+        fi
+        make -s exec SVC=ceph OPTS=-T CMD="rados --pool rbd listomapvals nvmeof.state" | grep "NVMeTLSkey"
+        if [[ $? -eq 0 ]]; then
+            echo "Shouldn't have unencrypted PSK keys in OMAP"
+            exit 1
+        fi
+    set -e
+
+    echo "ℹ️  disable key encryption"
+    sed -i '/enable_key_encryption/d' ceph-nvmeof.conf
+    sed -i '/encryption_key/i enable_key_encryption = False' ceph-nvmeof.conf
+    sed -i '/encryption_key/d' ceph-nvmeof.conf
+    sed -i '#encryption_key#i #encryption_key = /etc/ceph/encryption.key#' ceph-nvmeof.conf
+    container_id=$(docker ps -q -f name=nvmeof)
+    docker restart ${container_id}
+    sleep 20
+    cephnvmf_func subsystem add --subsystem ${NQN}5 --no-group-append
+    cephnvmf_func host add --subsystem ${NQN}5 --host-nqn ${NQN}host17 --psk "${PSK_KEY1}"
+    cephnvmf_func host add --subsystem ${NQN}5 --host-nqn ${NQN}host18 --psk "${PSK_KEY2}"
+    cephnvmf_func host add --subsystem ${NQN}5 --host-nqn ${NQN}host19 --psk "${PSK_KEY3}"
+    make -s exec SVC=ceph OPTS=-T CMD="rados --pool rbd listomapvals nvmeof.state" | grep "NVMeTLSkey"
     return 0
 }
 
@@ -701,6 +735,12 @@ function demo_bdevperf_dhchap()
         echo "Connecting using no PSK key should fail"
         exit 1
     fi
+
+    make -s exec SVC=ceph OPTS=-T CMD="rados --pool rbd listomapvals nvmeof.state" | grep "DHHC"
+    if [[ $? -eq 0 ]]; then
+        echo "DHCHAP keys should be encrypted in OMAP"
+        exit 1
+    fi
     set -e
 
     echo "ℹ️  bdevperf tcp connect ip: $NVMEOF_IP_ADDRESS port: ${port4} nqn: ${NQN}host4 using PSK key"
@@ -850,6 +890,40 @@ function demo_bdevperf_dhchap()
     make exec SVC=nvmeof OPTS=-T CMD="test ! -d ${subsys2_dir}"
     dhchap_key_list=`make -s exec SVC=nvmeof OPTS=-T CMD="/usr/local/bin/spdk_rpc -s /var/tmp/spdk.sock keyring_get_keys"`
     [[ `echo $dhchap_key_list | jq -r '.[0]'` == "null" ]]
+
+    echo "ℹ️  use invalid encryption key"
+    sed -i '/enable_key_encryption/d' ceph-nvmeof.conf
+    sed -i 's#encryption_key = /etc/ceph/encryption.key#encryption_key = /etc/ceph/XXXencryption.key#' ceph-nvmeof.conf
+    container_id=$(docker ps -q -f name=nvmeof)
+    docker restart ${container_id}
+    sleep 20
+    cephnvmf_func subsystem add --subsystem ${NQN}4 --dhchap-key "${DHCHAP_KEY10}" --no-group-append
+    set +e
+        cephnvmf_func host add --subsystem ${NQN}4 --host-nqn ${NQN}hosta --dhchap-key "${DHCHAP_KEY11}"
+        if [[ $? -eq 0 ]]; then
+            echo "Add host with DHCHAP key should fail without valid encryption key"
+            exit 1
+        fi
+        make -s exec SVC=ceph OPTS=-T CMD="rados --pool rbd listomapvals nvmeof.state" | grep "DHHC"
+        if [[ $? -eq 0 ]]; then
+            echo "Shouldn't have unencrypted DHCHAP keys in OMAP"
+            exit 1
+        fi
+    set -e
+
+    echo "ℹ️  disable key encryption"
+    sed -i '/enable_key_encryption/d' ceph-nvmeof.conf
+    sed -i '/encryption_key/i enable_key_encryption = False' ceph-nvmeof.conf
+    sed -i '/encryption_key/d' ceph-nvmeof.conf
+    sed -i '#encryption_key#i #encryption_key = /etc/ceph/encryption.key#' ceph-nvmeof.conf
+    container_id=$(docker ps -q -f name=nvmeof)
+    docker restart ${container_id}
+    sleep 20
+    cephnvmf_func subsystem add --subsystem ${NQN}3 --dhchap-key "${DHCHAP_KEY10}" --no-group-append
+    cephnvmf_func host add --subsystem ${NQN}3 --host-nqn ${NQN}host7 --dhchap-key "${DHCHAP_KEY11}"
+    cephnvmf_func host add --subsystem ${NQN}3 --host-nqn ${NQN}host8 --dhchap-key "${DHCHAP_KEY5}"
+    cephnvmf_func host add --subsystem ${NQN}3 --host-nqn ${NQN}host9 --dhchap-key "${DHCHAP_KEY6}"
+    make -s exec SVC=ceph OPTS=-T CMD="rados --pool rbd listomapvals nvmeof.state" | grep "DHHC"
 
     return 0
 }

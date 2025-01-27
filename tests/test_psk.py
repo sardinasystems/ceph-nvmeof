@@ -5,6 +5,7 @@ from control.cli import main as cli
 from control.cli import main_test as cli_test
 from control.cephutils import CephUtils
 import grpc
+import time
 
 image = "mytestdevimage"
 pool = "rbd"
@@ -22,6 +23,8 @@ hostnqn10 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f
 hostnqn11 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f5"
 hostnqn12 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f6"
 hostnqn13 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f7"
+hostnqn14 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f8"
+hostnqn15 = "nqn.2014-08.org.nvmexpress:uuid:22207d09-d8af-4ed2-84ec-a6d80b0cf7f9"
 
 hostpsk1 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
 hostpsk2 = \
@@ -60,6 +63,7 @@ def gateway(config):
     port = config.getint("gateway", "port")
     config.config["gateway-logs"]["log_level"] = "debug"
     config.config["gateway"]["group"] = ""
+    config.config["spdk"]["tgt_cmd_extra_args"] = "-m 0x03"
     ceph_utils = CephUtils(config)
 
     with GatewayServer(config) as gateway:
@@ -79,6 +83,41 @@ def gateway(config):
         # Stop gateway
         gateway.server.stop(grace=1)
         gateway.gateway_rpc.gateway_state.delete_state()
+
+
+@pytest.fixture(scope="function")
+def gateway_no_encryption_key(config):
+    """Sets up and tears down Gateway"""
+
+    addr = config.get("gateway", "addr")
+    port = config.getint("gateway", "port") + 2
+    discport = config.getint("discovery", "port") + 1
+    config.config["gateway"]["override_hostname"] = "GW2"
+    config.config["gateway"]["port"] = f"{port}"
+    config.config["discovery"]["port"] = f"{discport}"
+    config.config["spdk"]["rpc_socket_name"] = "spdk2.sock"
+    config.config["gateway-logs"]["log_level"] = "debug"
+    config.config["gateway"]["group"] = ""
+    config.config["gateway"]["encryption_key"] = "/etc/ceph/NOencryption.key"
+    config.config["spdk"]["tgt_cmd_extra_args"] = "-m 0x0C"
+    ceph_utils = CephUtils(config)
+
+    with GatewayServer(config) as gateway_no_encryption_key:
+
+        # Start gateway
+        gateway_no_encryption_key.gw_logger_object.set_log_level("debug")
+        ceph_utils.execute_ceph_monitor_command(
+            "{" + f'"prefix":"nvme-gw create", "id": "{gateway_no_encryption_key.name}", '
+            f'"pool": "{pool}", "group": ""' + "}"
+        )
+        gateway_no_encryption_key.serve()
+
+        # Bind the client and Gateway
+        grpc.insecure_channel(f"{addr}:{port}")
+        yield gateway_no_encryption_key.gateway_rpc
+
+        # Stop gateway
+        gateway_no_encryption_key.server.stop(grace=1)
 
 
 def test_setup(caplog, gateway):
@@ -275,11 +314,11 @@ def test_allow_any_host_with_psk(caplog, gateway):
 
 def test_psk_with_dhchap(caplog, gateway):
     caplog.clear()
-    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn10,
+    cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn14,
          "--psk", hostpsk1, "--dhchap-key", hostdhchap1])
-    assert f"Adding host {hostnqn10} to {subsystem}: Successful" in caplog.text
-    assert f"Host {hostnqn10} has a DH-HMAC-CHAP key but subsystem {subsystem} " \
-           f"has no key, a unidirectional authentication will be used" in caplog.text
+    assert f"Adding host {hostnqn14} to {subsystem}: Successful" in caplog.text
+    assert f"Host {hostnqn14} has a DH-HMAC-CHAP key but subsystem {subsystem} " \
+           f"has none, a unidirectional authentication will be used" in caplog.text
 
 
 def test_list_listeners(caplog, gateway):
@@ -310,3 +349,34 @@ def test_add_host_with_key_host_list(caplog, gateway):
         pass
     assert "Can't have more than one host NQN when PSK keys are used" in caplog.text
     assert rc == 2
+
+
+def test_add_host_with_no_encryption_key(caplog, gateway_no_encryption_key):
+    _ = gateway_no_encryption_key
+    found = False
+    lookfor = "No valid encryption key file was set. Any attempt to encrypt or " \
+              "decrypt keys would fail"
+    for oneline in caplog.get_records("setup"):
+        if oneline.message == lookfor:
+            found = True
+            break
+    assert found
+    time.sleep(15)
+    found = False
+    lookfor = f"No encryption key or the wrong key was found but we need to decrypt host " \
+              f"{hostnqn13} PSK key"
+    for oneline in caplog.get_records("setup"):
+        if oneline.message.startswith(lookfor):
+            found = True
+            break
+    assert found or lookfor in caplog.text
+    caplog.clear()
+    cli(["--server-port", "5502", "--format", "json", "host", "list", "--subsystem", subsystem])
+    assert f"{hostnqn13}" not in caplog.text
+    assert f"{hostnqn6}" in caplog.text
+    assert f"{hostnqn7}" in caplog.text
+    caplog.clear()
+    cli(["--server-port", "5502", "host", "add", "--subsystem", subsystem,
+         "--host-nqn", hostnqn15, "--psk", hostpsk1])
+    assert f"Failure adding host {hostnqn15} to {subsystem}: No encryption key or the wrong " \
+           f"key was found but we need to encrypt host {hostnqn15} PSK key" in caplog.text

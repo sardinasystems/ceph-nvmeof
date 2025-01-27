@@ -18,6 +18,9 @@ import gzip
 import shutil
 import netifaces
 from typing import Tuple, List
+from cryptography.fernet import Fernet
+import cryptography.exceptions
+import base64
 
 
 class GatewayEnumUtils:
@@ -196,6 +199,62 @@ class GatewayUtils:
                     f"Invalid NQN \"{nqn}\": reverse domain is not formatted correctly: {rc[1]}")
 
         return (0, os.strerror(0))
+
+
+class GatewayUtilsCrypto:
+    KEY_SIZE = 32
+    INVALID_KEY_VALUE = "<invalid>"
+
+    def __init__(self, encryption_key: bytes):
+        if encryption_key:
+            self.__secret_box = Fernet(encryption_key)
+        else:
+            self.__secret_box = None
+
+    @classmethod
+    def read_encryption_key(cls, keyfile: str) -> bytes:
+        keyval = ""
+        encoded_key = None
+        try:
+            with open(keyfile) as f:
+                for line in f:
+                    if line.startswith("-----BEGIN PRIVATE KEY-----"):
+                        continue
+                    if line.startswith("-----END PRIVATE KEY-----"):
+                        continue
+                    keyval += line.rstrip('\n')
+        except FileNotFoundError:
+            return None
+
+        keybytes = base64.b64decode(keyval, validate=True)
+        if len(keybytes) < cls.KEY_SIZE:
+            raise RuntimeError(f"Encryption key has length {len(keybytes)} which is too short. "
+                               f"The minimal length is {cls.KEY_SIZE}")
+        encoded_key = base64.urlsafe_b64encode(keybytes[:cls.KEY_SIZE])
+
+        return encoded_key
+
+    def encrypt_text(self, msg: str) -> str:
+        if self.__secret_box:
+            encrypted = base64.b64encode(
+                self.__secret_box.encrypt(msg.encode("utf-8"))).decode("utf-8")
+        else:
+            encrypted = msg
+        return encrypted
+
+    def decrypt_text(self, msg: str) -> str:
+        plain = None
+        if self.__secret_box:
+            try:
+                plain = self.__secret_box.decrypt(
+                    base64.b64decode(msg.encode("utf-8"))).decode("utf-8")
+            except cryptography.exceptions.InvalidSignature:
+                plain = None
+            except cryptography.fernet.InvalidToken:
+                plain = None
+        else:
+            plain = msg
+        return plain
 
 
 class GatewayLogger:

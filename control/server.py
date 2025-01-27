@@ -33,6 +33,7 @@ from .discovery import DiscoveryService
 from .config import GatewayConfig
 from .utils import GatewayLogger
 from .utils import GatewayUtils
+from .utils import GatewayUtilsCrypto
 from .cephutils import CephUtils
 from .prometheus import start_exporter
 
@@ -119,6 +120,22 @@ class GatewayServer:
         self.monitor_client_log_file_path = None
         self.omap_state = None
         self.omap_lock = None
+        self.crypto = None
+        enc_key = None
+        enc_key_file = self.config.get_with_default("gateway", "encryption_key", "")
+        if enc_key_file:
+            try:
+                enc_key = GatewayUtilsCrypto.read_encryption_key(enc_key_file)
+            except Exception:
+                self.logger.exception(f"Got an error trying to read encryption key "
+                                      f"{enc_key_file}. Any attempt to encrypt or "
+                                      f"decrypt keys would fail")
+        if enc_key:
+            self.logger.info(f"Read encryption key from {enc_key_file}")
+            self.crypto = GatewayUtilsCrypto(enc_key)
+        else:
+            self.logger.warning("No valid encryption key file was set. Any attempt to "
+                                "encrypt or decrypt keys would fail")
 
         self.name = self.config.get("gateway", "name")
         if not self.name:
@@ -133,7 +150,7 @@ class GatewayServer:
         if self.gateway_rpc:
             self.gateway_rpc.up_and_running = False
         if exc_type is not None:
-            self.logger.exception("GatewayServer exception occurred:")
+            self.logger.exception("GatewayServer exception occurred:\n{traceback}\n")
         else:
             self.logger.info("GatewayServer is terminating gracefully...")
 
@@ -248,7 +265,8 @@ class GatewayServer:
 
         # Register service implementation with server
         gateway_state = GatewayStateHandler(self.config, local_state, omap_state,
-                                            self.gateway_rpc_caller, f"gateway-{self.name}")
+                                            self.gateway_rpc_caller, self.crypto,
+                                            f"gateway-{self.name}")
         self.omap_lock = OmapLock(omap_state, gateway_state, self.rpc_lock)
         self.gateway_rpc = GatewayService(self.config, gateway_state, self.rpc_lock,
                                           self.omap_lock, self.group_id, self.spdk_rpc_client,
@@ -850,6 +868,22 @@ class GatewayServer:
                 if is_add_req:
                     req = json_format.Parse(val, pb2.create_subsystem_req(),
                                             ignore_unknown_fields=True)
+                    if req.key_encrypted and req.dhchap_key:
+                        dhchap_key_decrypted = None
+                        if self.crypto:
+                            dhchap_key_decrypted = self.crypto.decrypt_text(req.dhchap_key)
+                            req.key_encrypted = False
+                        if dhchap_key_decrypted:
+                            req.dhchap_key = dhchap_key_decrypted
+                        else:
+                            # TODO: raise an alert
+                            self.logger.warning(f"No encryption key or the wrong key was found "
+                                                f"but we need to decrypt a subsystem "
+                                                f"DH-HMAC-CHAP key. Any attempt to add host "
+                                                f"access using a DH-HMAC-CHAP key to subsystem "
+                                                f"{req.subsystem_nqn} would fail")
+                            req.dhchap_key = GatewayUtilsCrypto.INVALID_KEY_VALUE
+                            req.key_encrypted = False
                     self.gateway_rpc.create_subsystem(req)
                 else:
                     req = json_format.Parse(val,
@@ -879,6 +913,34 @@ class GatewayServer:
                 if is_add_req:
                     req = json_format.Parse(val, pb2.add_host_req(),
                                             ignore_unknown_fields=True)
+                    if req.key_encrypted and req.dhchap_key:
+                        dhchap_key_decrypted = None
+                        if self.crypto:
+                            dhchap_key_decrypted = self.crypto.decrypt_text(req.dhchap_key)
+                            req.key_encrypted = False
+                        if dhchap_key_decrypted:
+                            req.dhchap_key = dhchap_key_decrypted
+                        else:
+                            # TODO: raise an alert
+                            self.logger.warning(f"No encryption key or the wrong key was found "
+                                                f"but we need to decrypt host {req.host_nqn} "
+                                                f"DH-HMAC-CHAP key")
+                            req.dhchap_key = GatewayUtilsCrypto.INVALID_KEY_VALUE
+                            req.key_encrypted = False
+                    if req.psk_encrypted and req.psk:
+                        psk_decrypted = None
+                        if self.crypto:
+                            psk_decrypted = self.crypto.decrypt_text(req.psk)
+                            req.psk_encrypted = False
+                        if psk_decrypted:
+                            req.psk = psk_decrypted
+                        else:
+                            # TODO: raise an alert
+                            self.logger.warning(f"No encryption key or the wrong key was found "
+                                                f"but we need to decrypt host {req.host_nqn} "
+                                                f"PSK key")
+                            req.psk = GatewayUtilsCrypto.INVALID_KEY_VALUE
+                            req.psk_encrypted = False
                     self.gateway_rpc.add_host(req)
                 else:
                     req = json_format.Parse(val, pb2.remove_host_req(),
