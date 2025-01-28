@@ -1477,7 +1477,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
         peer_msg = self.get_peer_message(context)
         delete_subsystem_error_prefix = f"Failure deleting subsystem {request.subsystem_nqn}"
         self.logger.info(f"Received request to delete subsystem {request.subsystem_nqn}, "
-                         f"context: {context}{peer_msg}")
+                         f"force: {request.force}, context: {context}{peer_msg}")
 
         if not request.subsystem_nqn:
             errmsg = "Failure deleting subsystem, missing subsystem NQN"

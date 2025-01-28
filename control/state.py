@@ -50,77 +50,80 @@ class GatewayState(ABC):
         return True
 
     def build_namespace_key(subsystem_nqn: str, nsid) -> str:
-        key = GatewayState.NAMESPACE_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid)
         return key
 
     def build_namespace_lbgroup_key(subsystem_nqn: str, nsid) -> str:
-        key = GatewayState.NAMESPACE_LB_GROUP_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_LB_GROUP_PREFIX + subsystem_nqn + \
+            GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid)
         return key
 
     def build_namespace_visibility_key(subsystem_nqn: str, nsid) -> str:
-        key = GatewayState.NAMESPACE_VISIBILITY_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_VISIBILITY_PREFIX + subsystem_nqn + \
+            GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid)
         return key
 
     def build_namespace_trash_image_key(subsystem_nqn: str, nsid) -> str:
-        key = GatewayState.NAMESPACE_TRASH_IMAGE_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_TRASH_IMAGE_PREFIX + subsystem_nqn + \
+            GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid)
         return key
 
     def build_namespace_qos_key(subsystem_nqn: str, nsid) -> str:
-        key = GatewayState.NAMESPACE_QOS_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_QOS_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid)
         return key
 
     def build_namespace_host_key(subsystem_nqn: str, nsid, host: str) -> str:
-        key = GatewayState.NAMESPACE_HOST_PREFIX + subsystem_nqn
+        key = GatewayState.NAMESPACE_HOST_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if nsid is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + str(nsid)
+            key += str(nsid) + GatewayState.OMAP_KEY_DELIMITER
             if host:
-                key += GatewayState.OMAP_KEY_DELIMITER + host
+                key += host
         return key
 
     def build_subsystem_key(subsystem_nqn: str) -> str:
         return GatewayState.SUBSYSTEM_PREFIX + subsystem_nqn
 
     def build_host_key(subsystem_nqn: str, host_nqn: str) -> str:
-        key = GatewayState.HOST_PREFIX + subsystem_nqn
+        key = GatewayState.HOST_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if host_nqn is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + host_nqn
+            key += host_nqn
         return key
 
     def build_host_key_key(subsystem_nqn: str, host_nqn: str) -> str:
-        key = GatewayState.HOST_KEY_PREFIX + subsystem_nqn
+        key = GatewayState.HOST_KEY_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if host_nqn is not None:
-            key += GatewayState.OMAP_KEY_DELIMITER + host_nqn
+            key += host_nqn
         return key
 
     def build_subsystem_key_key(subsystem_nqn: str) -> str:
         return GatewayState.SUBSYSTEM_KEY_PREFIX + subsystem_nqn
 
     def build_partial_listener_key(subsystem_nqn: str, host: str) -> str:
-        key = GatewayState.LISTENER_PREFIX + subsystem_nqn
+        key = GatewayState.LISTENER_PREFIX + subsystem_nqn + GatewayState.OMAP_KEY_DELIMITER
         if host:
-            key += GatewayState.OMAP_KEY_DELIMITER + host
+            key += host + GatewayState.OMAP_KEY_DELIMITER
         return key
 
     def build_listener_key_suffix(host: str, trtype: str, traddr: str, trsvcid: int) -> str:
         if host:
-            return GatewayState.OMAP_KEY_DELIMITER + host + \
+            return host + \
                 GatewayState.OMAP_KEY_DELIMITER + trtype + GatewayState.OMAP_KEY_DELIMITER + \
                 traddr + GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
         if trtype:
-            return GatewayState.OMAP_KEY_DELIMITER + trtype + \
+            return trtype + \
                 GatewayState.OMAP_KEY_DELIMITER + traddr + \
                 GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
-        return GatewayState.OMAP_KEY_DELIMITER + traddr + \
+        return traddr + \
             GatewayState.OMAP_KEY_DELIMITER + str(trsvcid)
 
     def build_listener_key(subsystem_nqn: str, host: str, trtype: str,
@@ -1138,13 +1141,10 @@ class GatewayStateHandler:
                 only_trash_image_changed = []
                 only_host_key_changed = []
                 only_subsystem_key_changed = []
-                ns_prefix = GatewayState.build_namespace_key("nqn", None)
-                host_prefix = GatewayState.build_host_key("nqn", None)
-                subsystem_prefix = GatewayState.build_subsystem_key("nqn")
                 for key in changed.keys():
                     self.logger.info(f"Changed key: {key} local-state: {local_state_dict[key]}"
                                      f" omap-state: {omap_state_dict[key]}")
-                    if key.startswith(ns_prefix):
+                    if key.startswith(GatewayState.NAMESPACE_PREFIX):
                         (should_process, new_lb_grp_id) = self.namespace_only_lb_group_id_changed(
                             local_state_dict[key],
                             omap_state_dict[key])
@@ -1172,7 +1172,7 @@ class GatewayStateHandler:
                                               f"flag has changed. "
                                               f"The new flag is {new_trash_image}")
                             only_trash_image_changed.append((key, new_trash_image))
-                    elif key.startswith(host_prefix):
+                    elif key.startswith(GatewayState.HOST_PREFIX):
                         (should_process,
                          new_dhchap_key,
                          new_key_encrypted) = self.host_only_key_changed(
@@ -1182,7 +1182,7 @@ class GatewayStateHandler:
                             self.logger.debug(f"Found {key} where only the key has changed. The "
                                               f"new DHCHAP key is {new_dhchap_key}")
                             only_host_key_changed.append((key, new_dhchap_key, new_key_encrypted))
-                    elif key.startswith(subsystem_prefix):
+                    elif key.startswith(GatewayState.SUBSYSTEM_PREFIX):
                         (should_process,
                          new_dhchap_key,
                          new_key_encrypted) = self.subsystem_only_key_changed(
