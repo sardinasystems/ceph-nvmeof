@@ -43,6 +43,7 @@ from .utils import GatewayEnumUtils
 from .utils import GatewayUtils
 from .utils import GatewayUtilsCrypto
 from .utils import GatewayLogger
+from .utils import NICS
 from .state import GatewayState, GatewayStateHandler, OmapLock
 from .cephutils import CephUtils
 from .rebalance import Rebalance
@@ -556,6 +557,9 @@ class GatewayService(pb2_grpc.GatewayServicer):
             self.host_name = socket.gethostname()
         self.verify_nqns = self.config.getboolean_with_default("gateway", "verify_nqns", True)
         self.verify_keys = self.config.getboolean_with_default("gateway", "verify_keys", True)
+        self.verify_listener_ip = self.config.getboolean_with_default("gateway",
+                                                                      "verify_listener_ip",
+                                                                      True)
         self.gateway_group = self.config.get_with_default("gateway", "group", "")
         self.max_hosts_per_namespace = self.config.getint_with_default(
             "gateway",
@@ -4205,6 +4209,18 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                      f"listens on address {request.traddr}:{request.trsvcid}"
                             self.logger.error(errmsg)
                             return pb2.req_status(status=errno.EEXIST, error_message=errmsg)
+
+                    if self.verify_listener_ip:
+                        nics = NICS(True)
+                        address_to_check = GatewayUtils.unescape_address(request.traddr)
+                        if not nics.verify_ip_address(address_to_check, adrfam):
+                            for dev in nics.adapters.values():
+                                self.logger.debug(f"NIC: {dev}")
+                            errmsg = f"{create_listener_error_prefix}: Address " \
+                                     f"{address_to_check} is not available as an " \
+                                     f"{adrfam.upper()} address"
+                            self.logger.error(errmsg)
+                            return pb2.req_status(status=errno.EADDRNOTAVAIL, error_message=errmsg)
 
                     ret = rpc_nvmf.nvmf_subsystem_add_listener(self.spdk_rpc_client,
                                                                **add_listener_args)

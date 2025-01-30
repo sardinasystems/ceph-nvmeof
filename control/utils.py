@@ -68,10 +68,15 @@ class GatewayUtils:
             ret_addr = f"[{addr}]"
         return ret_addr
 
+    def unescape_address(addr: str) -> str:
+        ret_addr = addr.strip()
+        ret_addr = ret_addr.removeprefix("[").removesuffix("]")
+        return ret_addr
+
     def unescape_address_if_ipv6(addr: str, adrfam: str) -> str:
         ret_addr = addr.strip()
         if adrfam.lower() == "ipv6":
-            ret_addr = ret_addr.removeprefix("[").removesuffix("]")
+            ret_addr = GatewayUtils.unescape_address(addr)
         return ret_addr
 
     def is_discovery_nqn(nqn) -> bool:
@@ -507,16 +512,17 @@ class GatewayLogger:
 
 
 class NICS:
-    ignored_device_prefixes = ('lo')
-
-    def __init__(self):
+    def __init__(self, handle_all=False):
+        self.ignored_device_prefixes = ('lo')
         self.addresses = {}
         self.adapters = {}
+        if handle_all:
+            self.ignored_device_prefixes = ()
         self._build_adapter_info()
 
     def _build_adapter_info(self):
         for device_name in netifaces.interfaces():
-            if device_name.startswith(NICS.ignored_device_prefixes):
+            if device_name.startswith(self.ignored_device_prefixes):
                 continue
             nic = NIC(device_name)
             for ipv4_addr in nic.ipv4_addresses:
@@ -525,6 +531,37 @@ class NICS:
                 self.addresses[ipv6_addr] = device_name
 
             self.adapters[device_name] = nic
+
+    def verify_ip_address(self, addr: str, family: str) -> bool:
+        family = family.lower()
+        # Allow "any host" address
+        if family == "ipv4":
+            if addr == "0.0.0.0":
+                return True
+        elif family == "ipv6":
+            if addr == "::":
+                return True
+        else:
+            assert False, f"Invalid address family {family}"
+        if addr not in self.addresses:
+            return False
+        dev_name = self.addresses[addr]
+        if dev_name not in self.adapters:
+            return False
+        adapter = self.adapters[dev_name]
+        # The local interface has a state "unknown"
+        if adapter.operstate != "up" and adapter.operstate != "unknown":
+            return False
+        # This should be the last condition
+        if family == "ipv4":
+            for v4addr in adapter.ipv4_list:
+                if "addr" in v4addr and v4addr["addr"] == addr:
+                    return True
+        elif family == "ipv6":
+            for v6addr in adapter.ipv6_list:
+                if "addr" in v6addr and v6addr["addr"] == addr:
+                    return True
+        return False
 
 
 class NIC:
