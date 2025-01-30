@@ -79,6 +79,10 @@ listener_list_discovery = [["-n", discovery_nqn, "-t", host_name, "-a", addr, "-
 listener_list_negative_port = [["-t", host_name, "-a", addr, "-s", "-2000"]]
 listener_list_big_port = [["-t", host_name, "-a", addr, "-s", "70000"]]
 listener_list_wrong_host = [["-t", "WRONG", "-a", addr, "-s", "5015", "-f", "ipv4"]]
+listener_list_bad_ips = [["-a", "127.1.1.1", "-s", "5011", "-f", "ipv4"],
+                         ["-a", "fe80::a00:27ff:fe38:1d48", "-s", "5022", "-f", "ipv6"],
+                         ["-a", addr, "-s", "5033", "-f", "ipv6"],
+                         ["-a", addr_ipv6, "-s", "5044"]]
 config = "ceph-nvmeof.conf"
 group_name = "GROUPNAME"
 
@@ -1262,6 +1266,19 @@ class TestCreate:
         cli(["listener", "add", "--subsystem", subsystem] + listener)
         assert f"Adding {subsystem} listener at {addr}:5015: listener will only be active when " \
                f"appropriate gateway is up" in caplog.text
+
+    @pytest.mark.parametrize("listener", listener_list_bad_ips)
+    def test_create_listener_bad_ips(self, caplog, listener, gateway):
+        caplog.clear()
+        cli(["listener", "add", "--subsystem", subsystem, "--host-name", host_name,
+             "--verify-host-name"] + listener)
+        if ":" in listener[1]:
+            # IPv6, escape host address
+            assert f"Failure adding {subsystem} listener at [{listener[1]}]:{listener[3]}: " \
+                   f"Address {listener[1]} is not available" in caplog.text
+        else:
+            assert f"Failure adding {subsystem} listener at {listener[1]}:{listener[3]}: " \
+                   f"Address {listener[1]} is not available" in caplog.text
 
     @pytest.mark.parametrize("listener", listener_list_invalid_adrfam)
     def test_create_listener_invalid_adrfam(self, caplog, listener, gateway):
