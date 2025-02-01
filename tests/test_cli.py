@@ -4,6 +4,7 @@ import socket
 from control.cli import main as cli
 from control.cli import main_test as cli_test
 from control.cephutils import CephUtils
+from control.utils import GatewayUtils
 import spdk.rpc.bdev as rpc_bdev
 from spdk.rpc import spdk_get_version
 import grpc
@@ -45,6 +46,7 @@ subsystem7 = "nqn.2016-06.io.spdk:cnode7"
 subsystem8 = "nqn.2016-06.io.spdk:cnode8"
 subsystem9 = "nqn.2016-06.io.spdk:cnode9"
 subsystem10 = "nqn.2016-06.io.spdk:cnode10"
+subsystem11 = "nqn.2016-06.io.spdk:cnode11"
 subsystemX = "nqn.2016-06.io.spdk:cnodeX"
 discovery_nqn = "nqn.2014-08.org.nvmexpress.discovery"
 serial = "Ceph00000000000001"
@@ -79,10 +81,10 @@ listener_list_discovery = [["-n", discovery_nqn, "-t", host_name, "-a", addr, "-
 listener_list_negative_port = [["-t", host_name, "-a", addr, "-s", "-2000"]]
 listener_list_big_port = [["-t", host_name, "-a", addr, "-s", "70000"]]
 listener_list_wrong_host = [["-t", "WRONG", "-a", addr, "-s", "5015", "-f", "ipv4"]]
-listener_list_bad_ips = [["-a", "127.1.1.1", "-s", "5011", "-f", "ipv4"],
-                         ["-a", "fe80::a00:27ff:fe38:1d48", "-s", "5022", "-f", "ipv6"],
-                         ["-a", addr, "-s", "5033", "-f", "ipv6"],
-                         ["-a", addr_ipv6, "-s", "5044"]]
+listener_list_bad_ips = [["127.1.1.1", 5011, "ipv4"],
+                         ["[fe80::a00:27ff:fe38:1d48]", 5022, "ipv6"],
+                         [addr, 5033, "ipv6"],
+                         [f"[{addr_ipv6}]", 5044, "ipv4"]]
 config = "ceph-nvmeof.conf"
 group_name = "GROUPNAME"
 
@@ -1269,16 +1271,19 @@ class TestCreate:
 
     @pytest.mark.parametrize("listener", listener_list_bad_ips)
     def test_create_listener_bad_ips(self, caplog, listener, gateway):
+        gw, stub = gateway
+        traddr = GatewayUtils.unescape_address(listener[0])
+        listener_add_req = pb2.create_listener_req(
+            nqn=subsystem,
+            host_name=host_name,
+            adrfam=listener[2],
+            traddr=listener[0],
+            trsvcid=listener[1],
+            verify_host_name=True)
         caplog.clear()
-        cli(["listener", "add", "--subsystem", subsystem, "--host-name", host_name,
-             "--verify-host-name"] + listener)
-        if ":" in listener[1]:
-            # IPv6, escape host address
-            assert f"Failure adding {subsystem} listener at [{listener[1]}]:{listener[3]}: " \
-                   f"Address {listener[1]} is not available" in caplog.text
-        else:
-            assert f"Failure adding {subsystem} listener at {listener[1]}:{listener[3]}: " \
-                   f"Address {listener[1]} is not available" in caplog.text
+        stub.create_listener(listener_add_req)
+        assert f"Failure adding {subsystem} listener at {listener[0]}:{listener[1]}: " \
+               f"Address {traddr} is not available" in caplog.text
 
     @pytest.mark.parametrize("listener", listener_list_invalid_adrfam)
     def test_create_listener_invalid_adrfam(self, caplog, listener, gateway):
@@ -1878,3 +1883,47 @@ class TestSubsystemWithIdenticalPrefix:
                 found10 += 1
         assert found == 0
         assert found10 == 2
+
+
+class TestListenerBadIPAddresses:
+    def test_listener_bad_ip_adresses(self, caplog, gateway):
+        gw, stub = gateway
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem11, "--no-group-append"])
+        assert f"Adding subsystem {subsystem11}: Successful" in caplog.text
+        rc = 0
+        try:
+            cli(["listener", "add", "--subsystem", subsystem11, "--traddr", "3.4",
+                 "--trsvcid", "4620", "--host-name", host_name])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: invalid IP address 3.4" in caplog.text
+        assert rc == 2
+        rc = 0
+        try:
+            cli(["listener", "add", "--subsystem", subsystem11, "--traddr", "192.44.32.43",
+                 "--adrfam", "ipv6", "--trsvcid", "4620", "--host-name", host_name])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: IP address 192.44.32.43 is not an IPv6 address" in caplog.text
+        assert rc == 2
+        rc = 0
+        try:
+            cli(["listener", "add", "--subsystem", subsystem11, "--traddr", "::",
+                 "--adrfam", "ipv4", "--trsvcid", "4620", "--host-name", host_name])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: IP address :: is not an IPv4 address" in caplog.text
+        assert rc == 2
+        rc = 0
+        try:
+            cli(["listener", "add", "--subsystem", subsystem11, "--traddr", "::",
+                 "--trsvcid", "4620", "--host-name", host_name])
+        except SystemExit as sysex:
+            rc = int(str(sysex))
+            pass
+        assert "error: IP address :: is not an IPv4 address" in caplog.text
+        assert rc == 2
