@@ -388,6 +388,8 @@ class GatewayClient:
                 out_func(f"Gateway's port: {gw_info.port}")
                 if gw_info.max_subsystems:
                     out_func(f"Gateway's max subsystems: {gw_info.max_subsystems}")
+                if gw_info.max_hosts:
+                    out_func(f"Gateway's max hosts: {gw_info.max_hosts}")
                 if gw_info.max_namespaces:
                     out_func(f"Gateway's max namespaces: {gw_info.max_namespaces}")
                 if gw_info.max_namespaces_per_subsystem:

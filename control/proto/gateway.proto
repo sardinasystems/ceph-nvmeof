@@ -449,6 +449,7 @@ message gateway_info {
 	optional uint32 max_namespaces = 14;
 	optional uint32 max_hosts_per_subsystem = 15;
 	optional uint32 max_namespaces_per_subsystem = 16;
+	optional uint32 max_hosts = 17;
 }
 
 message cli_version {
