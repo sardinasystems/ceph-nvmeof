@@ -4154,7 +4154,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                          f" verify host name: {request.verify_host_name},"
                          f" context: {context}{peer_msg}")
 
-        traddr = GatewayUtils.unescape_address_if_ipv6(request.traddr, adrfam)
+        traddr = GatewayUtils.unescape_address(request.traddr)
 
         if GatewayUtils.is_discovery_nqn(request.nqn):
             errmsg = f"{create_listener_error_prefix}: Can't create a " \
@@ -4212,12 +4212,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
                     if self.verify_listener_ip:
                         nics = NICS(True)
-                        address_to_check = GatewayUtils.unescape_address(request.traddr)
-                        if not nics.verify_ip_address(address_to_check, adrfam):
+                        if not nics.verify_ip_address(traddr, adrfam):
                             for dev in nics.adapters.values():
                                 self.logger.debug(f"NIC: {dev}")
                             errmsg = f"{create_listener_error_prefix}: Address " \
-                                     f"{address_to_check} is not available as an " \
+                                     f"{traddr} is not available as an " \
                                      f"{adrfam.upper()} address"
                             self.logger.error(errmsg)
                             return pb2.req_status(status=errno.EADDRNOTAVAIL, error_message=errmsg)

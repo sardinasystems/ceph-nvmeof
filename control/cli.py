@@ -15,6 +15,7 @@ import sys
 import errno
 import os
 import yaml
+import ipaddress
 
 from functools import wraps
 from google.protobuf import json_format
@@ -272,6 +273,23 @@ class GatewayClient:
             return (print, errprint, errprint)
         else:
             self.cli.parser.error("invalid --output value")
+
+    def validate_ip_address(self, addr, family):
+        ipaddr = None
+        try:
+            ipaddr = ipaddress.ip_address(addr)
+        except ValueError:
+            ipaddr = None
+        if ipaddr is None:
+            self.cli.parser.error(f"invalid IP address {addr}")
+        if not family or family.lower() == "ipv4":
+            if ipaddr.version != 4:
+                self.cli.parser.error(f"IP address {addr} is not an IPv4 address")
+        elif family.lower() == "ipv6":
+            if ipaddr.version != 6:
+                self.cli.parser.error(f"IP address {addr} is not an IPv6 address")
+        else:
+            self.cli.parser.error(f"invalid address family {family}")
 
     @cli.cmd()
     def version(self, args):
@@ -1096,6 +1114,7 @@ class GatewayClient:
         if not args.adrfam:
             args.adrfam = "IPV4"
 
+        self.validate_ip_address(args.traddr, args.adrfam)
         traddr = GatewayUtils.escape_address_if_ipv6(args.traddr)
         adrfam = None
         if args.adrfam:
@@ -1115,7 +1134,7 @@ class GatewayClient:
             ret = self.stub.create_listener(req)
         except Exception as ex:
             ret = pb2.req_status(status=errno.EINVAL,
-                                 error_message=f"Failure adding {args.subsystem} listener at "
+                                 error_message=f"Failure adding {traddr} listener at "
                                                f"{traddr}:{args.trsvcid}:\n{ex}")
 
         orig_status = ret.status
@@ -1157,6 +1176,7 @@ class GatewayClient:
         if not args.adrfam:
             args.adrfam = "IPV4"
 
+        self.validate_ip_address(args.traddr, args.adrfam)
         if args.host_name == "*" and not args.force:
             self.cli.parser.error("must use --force when setting host name to *")
 
