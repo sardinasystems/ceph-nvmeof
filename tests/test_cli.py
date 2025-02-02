@@ -102,6 +102,7 @@ def gateway(config):
     config.config["gateway"]["max_namespaces"] = "12"
     config.config["gateway"]["max_namespaces_per_subsystem"] = "11"
     config.config["gateway"]["max_hosts_per_subsystem"] = "4"
+    config.config["gateway"]["max_hosts"] = "6"
     config.config["gateway-logs"]["log_level"] = "debug"
     ceph_utils = CephUtils(config)
 
@@ -198,6 +199,7 @@ class TestGet:
         assert gw_info.max_subsystems == 4
         assert gw_info.max_namespaces == 12
         assert gw_info.max_namespaces_per_subsystem == 11
+        assert gw_info.max_hosts == 6
         assert gw_info.max_hosts_per_subsystem == 4
         assert gw_info.status == 0
         assert gw_info.bool_status
@@ -617,7 +619,7 @@ class TestCreate:
         cli(["namespace", "add_host", "--subsystem", subsystem, "--nsid", "8",
              "--host-nqn", host11])
         assert f"Failure adding host {host11} to namespace 8 on {subsystem}: " \
-               f"Maximal host count for namespace (3) was already reached" in caplog.text
+               f"Maximal host count for namespace (3) has already been reached" in caplog.text
 
     def test_add_all_hosts_to_namespace(self, caplog, gateway):
         caplog.clear()
@@ -1662,6 +1664,22 @@ class TestTooManySubsystemsAndHosts:
         cli(["host", "add", "--subsystem", subsystem6, "--host-nqn", host5])
         assert f"Failure adding host {host5} to {subsystem6}: Maximal number of hosts for " \
                f"subsystem (4) has already been reached" in caplog.text
+        caplog.clear()
+        cli(["subsystem", "add", "--subsystem", subsystem7, "--no-group-append"])
+        assert f"Adding subsystem {subsystem7}: Successful" in caplog.text
+        caplog.clear()
+        cli(["host", "add", "--subsystem", subsystem7, "--host-nqn", host1])
+        assert f"Adding host {host1} to {subsystem7}: Successful" in caplog.text
+        caplog.clear()
+        cli(["host", "add", "--subsystem", subsystem7, "--host-nqn", host2])
+        assert f"Adding host {host2} to {subsystem7}: Successful" in caplog.text
+        caplog.clear()
+        cli(["host", "add", "--subsystem", subsystem7, "--host-nqn", host3])
+        assert f"Failure adding host {host3} to {subsystem7}: Maximal number of hosts " \
+               f"(6) has already been reached" in caplog.text
+        caplog.clear()
+        cli(["subsystem", "del", "--subsystem", subsystem7])
+        assert f"Deleting subsystem {subsystem7}: Successful" in caplog.text
 
 
 class TestGwLogLevel:

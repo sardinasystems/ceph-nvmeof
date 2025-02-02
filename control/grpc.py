@@ -301,9 +301,17 @@ class SubsystemHostAuth:
         self.host_nqn[subsys].discard(hostnqn)
 
     def get_host_count(self, subsys):
-        if subsys not in self.host_nqn:
-            return 0
-        return len(self.host_nqn[subsys])
+        if subsys is None:
+            subsys_list = self.host_nqn
+        else:
+            if subsys not in self.host_nqn:
+                return 0
+            subsys_list = [subsys]
+
+        cnt = 0
+        for s in subsys_list:
+            cnt += len(self.host_nqn[s])
+        return cnt
 
     def allow_any_host(self, subsys):
         self.subsys_allow_any_hosts[subsys] = True
@@ -523,7 +531,8 @@ class GatewayService(pb2_grpc.GatewayServicer):
     MAX_SUBSYSTEMS_DEFAULT = 128
     MAX_NAMESPACES_DEFAULT = 1024
     MAX_NAMESPACES_PER_SUBSYSTEM_DEFAULT = 256
-    MAX_HOSTS_PER_SUBSYS_DEFAULT = 32
+    MAX_HOSTS_PER_SUBSYS_DEFAULT = 128
+    MAX_HOSTS_DEFAULT = 2048
 
     def __init__(self, config: GatewayConfig, gateway_state: GatewayStateHandler,
                  rpc_lock, omap_lock: OmapLock, group_id: int, spdk_rpc_client,
@@ -585,6 +594,10 @@ class GatewayService(pb2_grpc.GatewayServicer):
             "gateway",
             "max_hosts_per_subsystem",
             GatewayService.MAX_HOSTS_PER_SUBSYS_DEFAULT)
+        self.max_hosts = self.config.getint_with_default(
+            "gateway",
+            "max_hosts",
+            GatewayService.MAX_HOSTS_DEFAULT)
         self.gateway_pool = self.config.get_with_default("ceph", "pool", "")
         self.enable_key_encryption = self.config.getboolean_with_default(
             "gateway",
@@ -3041,7 +3054,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
 
         if find_ret.host_count() >= self.max_hosts_per_namespace:
             errmsg = f"{failure_prefix}: Maximal host count for namespace " \
-                     f"({self.max_hosts_per_namespace}) was already reached"
+                     f"({self.max_hosts_per_namespace}) has already been reached"
             self.logger.error(errmsg)
             return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
@@ -3416,6 +3429,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
             if self.host_info.get_host_count(request.subsystem_nqn) >= self.max_hosts_per_subsystem:
                 errmsg = f"{host_failure_prefix}: Maximal number of hosts for subsystem " \
                          f"({self.max_hosts_per_subsystem}) has already been reached"
+                self.logger.error(errmsg)
+                return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
+            if self.host_info.get_host_count(None) >= self.max_hosts:
+                errmsg = f"{host_failure_prefix}: Maximal number of hosts " \
+                         f"({self.max_hosts}) has already been reached"
                 self.logger.error(errmsg)
                 return pb2.req_status(status=errno.E2BIG, error_message=errmsg)
 
@@ -5054,6 +5072,7 @@ class GatewayService(pb2_grpc.GatewayServicer):
                                max_namespaces=self.max_namespaces,
                                max_namespaces_per_subsystem=self.max_namespaces_per_subsystem,
                                max_hosts_per_subsystem=self.max_hosts_per_subsystem,
+                               max_hosts=self.max_hosts,
                                status=0,
                                error_message=os.strerror(0))
         cli_ver = self.parse_version(cli_version_string)
