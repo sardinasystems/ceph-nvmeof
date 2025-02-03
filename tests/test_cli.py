@@ -529,6 +529,20 @@ class TestCreate:
         cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--uuid", uuid])
         assert f'"uuid": "{uuid}"' in caplog.text
         caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid.upper()])
+        assert f'"uuid": "{uuid}"' in caplog.text
+        caplog.clear()
+        uuid_no_dashes = uuid.replace("-", "")
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid_no_dashes])
+        assert f'"uuid": "{uuid}"' in caplog.text
+        caplog.clear()
+        uuid_no_dashes = uuid.replace("-", "").upper()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid_no_dashes])
+        assert f'"uuid": "{uuid}"' in caplog.text
+        caplog.clear()
         cli(["namespace", "change_load_balancing_group", "--subsystem", subsystem,
              "--nsid", nsid, "--load-balancing-group", "10"])
         assert f"Failure changing load balancing group for namespace with ID {nsid} " \
@@ -1008,6 +1022,70 @@ class TestCreate:
         assert f"Resizing namespace 6 in {subsystem} to 64 MiB: Successful" in caplog.text
         caplog.clear()
         cli(["--format", "json", "namespace", "list", "--subsystem", subsystem, "--uuid", uuid2])
+        assert '"nsid": 6' in caplog.text
+        assert '"block_size": 512' in caplog.text
+        assert '"rbd_image_size": "67108864"' in caplog.text
+        assert f'"uuid": "{uuid2}"' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        assert '"nsid": 3' not in caplog.text
+        assert '"nsid": 4' not in caplog.text
+        assert '"nsid": 5' not in caplog.text
+        caplog.clear()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid2.upper()])
+        assert '"nsid": 6' in caplog.text
+        assert '"block_size": 512' in caplog.text
+        assert '"rbd_image_size": "67108864"' in caplog.text
+        assert f'"uuid": "{uuid2}"' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        assert '"nsid": 3' not in caplog.text
+        assert '"nsid": 4' not in caplog.text
+        assert '"nsid": 5' not in caplog.text
+        caplog.clear()
+        uuid2_no_dashes = uuid2.replace("-", "")
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid2_no_dashes])
+        assert '"nsid": 6' in caplog.text
+        assert '"block_size": 512' in caplog.text
+        assert '"rbd_image_size": "67108864"' in caplog.text
+        assert f'"uuid": "{uuid2}"' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        assert '"nsid": 3' not in caplog.text
+        assert '"nsid": 4' not in caplog.text
+        assert '"nsid": 5' not in caplog.text
+        caplog.clear()
+        uuid2_no_dashes = uuid2.replace("-", "").upper()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid2_no_dashes])
+        assert '"nsid": 6' in caplog.text
+        assert '"block_size": 512' in caplog.text
+        assert '"rbd_image_size": "67108864"' in caplog.text
+        assert f'"uuid": "{uuid2}"' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        assert '"nsid": 3' not in caplog.text
+        assert '"nsid": 4' not in caplog.text
+        assert '"nsid": 5' not in caplog.text
+        caplog.clear()
+        uuid2_some_dashes = uuid2.replace("-", "", 2)
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid2_some_dashes])
+        assert '"nsid": 6' in caplog.text
+        assert '"block_size": 512' in caplog.text
+        assert '"rbd_image_size": "67108864"' in caplog.text
+        assert f'"uuid": "{uuid2}"' in caplog.text
+        assert '"nsid": 1' not in caplog.text
+        assert '"nsid": 2' not in caplog.text
+        assert '"nsid": 3' not in caplog.text
+        assert '"nsid": 4' not in caplog.text
+        assert '"nsid": 5' not in caplog.text
+        caplog.clear()
+        uuid2_some_dashes = uuid2.replace("-", "", 2).upper()
+        cli(["--format", "json", "namespace", "list", "--subsystem", subsystem,
+             "--uuid", uuid2_some_dashes])
         assert '"nsid": 6' in caplog.text
         assert '"block_size": 512' in caplog.text
         assert '"rbd_image_size": "67108864"' in caplog.text
