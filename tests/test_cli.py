@@ -1398,6 +1398,12 @@ class TestDelete:
         else:
             assert f"Removing host {host} access from {subsystem}: Successful" in caplog.text
 
+    def test_remove_not_existing_host(self, caplog, gateway):
+        caplog.clear()
+        cli(["host", "del", "--subsystem", subsystem, "--host-nqn", hostxx])
+        assert f"Failure removing host {hostxx} access from {subsystem}: " \
+               f"Host is not found" in caplog.text
+
     def remove_host_list(self, caplog):
         caplog.clear()
         cli(["host", "del", "--subsystem", subsystem,
@@ -1421,6 +1427,13 @@ class TestDelete:
             pass
         assert "error: must use --force when setting host name to *" in caplog.text
         assert rc == 2
+
+    def test_delete_non_existing_listener(self, caplog, gateway):
+        caplog.clear()
+        cli(["listener", "del", "--subsystem", subsystem, "--host-name", host_name,
+             "--traddr", "4.4.4.4", "--trsvcid", "1234"])
+        assert f"Failed to delete listener 4.4.4.4:1234 from {subsystem}: " \
+               f"Listener not found" in caplog.text
 
     @pytest.mark.parametrize("listener", listener_list)
     def test_delete_listener(self, caplog, listener, gateway):
