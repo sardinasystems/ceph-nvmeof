@@ -404,6 +404,16 @@ class NamespaceInfo:
     def set_ana_group_id(self, anagrpid):
         self.anagrpid = anagrpid
 
+    @staticmethod
+    def are_uuids_equal(uuid1: str, uuid2: str) -> bool:
+        assert uuid1 and uuid2, "UUID can't be empty"
+        try:
+            if uuid.UUID(uuid1) == uuid.UUID(uuid2):
+                return True
+        except Exception:
+            pass
+        return False
+
 
 class NamespacesLocalList:
     EMPTY_NAMESPACE = NamespaceInfo(None, None, None, 0, False, None, None, False)
@@ -440,7 +450,7 @@ class NamespacesLocalList:
 
         if uuid:
             for ns in self.namespace_list[nqn]:
-                if uuid == self.namespace_list[nqn][ns].uuid:
+                if NamespaceInfo.are_uuids_equal(uuid, self.namespace_list[nqn][ns].uuid):
                     return self.namespace_list[nqn][ns]
 
         return NamespacesLocalList.EMPTY_NAMESPACE
@@ -2532,10 +2542,11 @@ class GatewayService(pb2_grpc.GatewayServicer):
                         self.logger.debug(f'Filter out namespace {n["nsid"]} which is '
                                           f'different than requested nsid {request.nsid}')
                         continue
-                    if request.uuid and request.uuid != n["uuid"]:
-                        self.logger.debug(f'Filter out namespace with UUID {n["uuid"]} which is '
-                                          f'different than requested UUID {request.uuid}')
-                        continue
+                    if request.uuid:
+                        if not NamespaceInfo.are_uuids_equal(request.uuid, n["uuid"]):
+                            self.logger.debug(f'Filter out namespace with UUID {n["uuid"]} which '
+                                              f'is different than requested UUID {request.uuid}')
+                            continue
                     lb_group = 0
                     try:
                         lb_group = n["anagrpid"]
