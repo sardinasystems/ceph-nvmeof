@@ -138,6 +138,7 @@ else
         --journalctl-to-console \
         --dont-power-off-cloud-vms \
         --dont-use-hugepages \
+	--concise-output \
         --skip-lb-group-change-test \
         --ibm-cloud-key=nokey \
         --github-nvmeof-token=nokey \
