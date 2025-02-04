@@ -1,6 +1,5 @@
 import pytest
 from control.server import GatewayServer
-import socket
 from control.cli import main as cli
 from control.cli import main_test as cli_test
 from control.cephutils import CephUtils
@@ -50,7 +49,6 @@ badhostpsk13 = "NVMeTLSkey-1:01:YztPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT
 
 hostdhchap1 = "DHHC-1:00:MWPqcx1Ug1debg8fPIGpkqbQhLcYUt39k7UWirkblaKEH1kE:"
 
-host_name = socket.gethostname()
 addr = "127.0.0.1"
 config = "ceph-nvmeof.conf"
 
@@ -61,6 +59,8 @@ def gateway(config):
 
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port")
+    config.config["gateway"]["name"] = "GW1"
+    config.config["gateway"]["override_hostname"] = "GW1"
     config.config["gateway-logs"]["log_level"] = "debug"
     config.config["gateway"]["group"] = ""
     config.config["spdk"]["tgt_cmd_extra_args"] = "-m 0x03"
@@ -92,6 +92,7 @@ def gateway_no_encryption_key(config):
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port") + 2
     discport = config.getint("discovery", "port") + 1
+    config.config["gateway"]["name"] = "GW2"
     config.config["gateway"]["override_hostname"] = "GW2"
     config.config["gateway"]["port"] = f"{port}"
     config.config["discovery"]["port"] = f"{discport}"
@@ -131,12 +132,13 @@ def test_setup(caplog, gateway):
 
 
 def test_create_secure_with_any_host(caplog, gateway):
+    gw = gateway
     caplog.clear()
     cli(["host", "add", "--subsystem", subsystem, "--host-nqn", "*"])
     assert f"Allowing open host access to {subsystem}: Successful" in caplog.text
     caplog.clear()
     cli(["listener", "add", "--subsystem", subsystem,
-         "--host-name", host_name, "-a", addr, "-s", "5001", "--secure"])
+         "--host-name", gw.gateway_name, "-a", addr, "-s", "5001", "--secure"])
     assert "Secure channel is only allowed for subsystems in which " \
            "\"allow any host\" is off" in caplog.text
     caplog.clear()
@@ -145,9 +147,10 @@ def test_create_secure_with_any_host(caplog, gateway):
 
 
 def test_create_secure(caplog, gateway):
+    gw = gateway
     caplog.clear()
     cli(["listener", "add", "--subsystem", subsystem,
-         "--host-name", host_name, "-a", addr, "-s", "5001", "--secure"])
+         "--host-name", gw.gateway_name, "-a", addr, "-s", "5001", "--secure"])
     assert f"Adding {subsystem} listener at {addr}:5001: Successful" in caplog.text
     caplog.clear()
     cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn1, "--psk", hostpsk1])
@@ -163,9 +166,10 @@ def test_create_secure(caplog, gateway):
 
 
 def test_create_not_secure(caplog, gateway):
+    gw = gateway
     caplog.clear()
     cli(["listener", "add", "--subsystem", subsystem,
-         "--host-name", host_name, "-a", addr, "-s", "5002"])
+         "--host-name", gw.gateway_name, "-a", addr, "-s", "5002"])
     assert f"Adding {subsystem} listener at {addr}:5002: Successful" in caplog.text
     caplog.clear()
     cli(["host", "add", "--subsystem", subsystem, "--host-nqn", hostnqn6])

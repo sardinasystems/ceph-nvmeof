@@ -1,6 +1,5 @@
 import pytest
 from control.server import GatewayServer
-import socket
 from control.cli import main as cli
 from control.cli import main_test as cli_test
 from control.cephutils import CephUtils
@@ -66,7 +65,6 @@ badhostdhchap13 = "DHHC-1:00:MWPrcx1Ug1debg8fPIGpkqbQhLcYUt39k7UWirkblaKEH1kE:"
 hostpsk1 = "NVMeTLSkey-1:01:YzrPElk4OYy1uUERriPwiiyEJE/+J5ckYpLB+5NHMsR2iBuT:"
 hostpsk2 = "NVMeTLSkey-1:01:vUrPe33Auz/sgAAcYctjI0oOOEFM5lheeLy7U+yTsD/LHm9q:"
 
-host_name = socket.gethostname()
 addr = "127.0.0.1"
 config = "ceph-nvmeof.conf"
 
@@ -77,6 +75,8 @@ def gateway(config):
 
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port")
+    config.config["gateway"]["name"] = "GW1"
+    config.config["gateway"]["override_hostname"] = "GW1"
     config.config["gateway-logs"]["log_level"] = "debug"
     config.config["gateway"]["group"] = ""
     config.config["spdk"]["tgt_cmd_extra_args"] = "-m 0x01"
@@ -108,6 +108,7 @@ def gateway_encryption_disabled(config):
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port") + 2
     discport = config.getint("discovery", "port") + 1
+    config.config["gateway"]["name"] = "GW2"
     config.config["gateway"]["override_hostname"] = "GW2"
     config.config["gateway"]["port"] = f"{port}"
     config.config["discovery"]["port"] = f"{discport}"
@@ -143,6 +144,7 @@ def gateway_no_encryption_key(config):
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port") + 2
     discport = config.getint("discovery", "port") + 1
+    config.config["gateway"]["name"] = "GW3"
     config.config["gateway"]["override_hostname"] = "GW3"
     config.config["gateway"]["port"] = f"{port}"
     config.config["discovery"]["port"] = f"{discport}"
@@ -179,6 +181,7 @@ def gateway_no_key_encryption_disabled(config):
     addr = config.get("gateway", "addr")
     port = config.getint("gateway", "port") + 2
     discport = config.getint("discovery", "port") + 1
+    config.config["gateway"]["name"] = "GW4"
     config.config["gateway"]["override_hostname"] = "GW4"
     config.config["gateway"]["port"] = f"{port}"
     config.config["discovery"]["port"] = f"{discport}"
@@ -238,8 +241,9 @@ def test_setup(caplog, gateway):
 
 
 def test_create_secure(caplog, gateway):
+    gw = gateway
     caplog.clear()
-    cli(["listener", "add", "--subsystem", subsystem, "--host-name", host_name,
+    cli(["listener", "add", "--subsystem", subsystem, "--host-name", gw.gateway_name,
          "-a", addr, "-s", "5001", "--secure"])
     assert f"Adding {subsystem} listener at {addr}:5001: Successful" in caplog.text
     caplog.clear()
@@ -263,8 +267,9 @@ def test_create_secure(caplog, gateway):
 
 
 def test_create_not_secure(caplog, gateway):
+    gw = gateway
     caplog.clear()
-    cli(["listener", "add", "--subsystem", subsystem, "--host-name", host_name,
+    cli(["listener", "add", "--subsystem", subsystem, "--host-name", gw.gateway_name,
          "-a", addr, "-s", "5002"])
     assert f"Adding {subsystem} listener at {addr}:5002: Successful" in caplog.text
     caplog.clear()
